@@ -26,13 +26,14 @@ class HomeViewController: UIViewController {
     private let goButton  = UIButton(type: .system)
     private var barView   = UIView()
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        title = "CustomBVK"
-        view.backgroundColor = .systemBackground
-        setupURLBar()
-        setupTable()
-    }
+   override func viewDidLoad() {
+    super.viewDidLoad()
+    title = "CustomBVK"
+    view.backgroundColor = .systemBackground
+    setupBackground()
+    setupURLBar()
+    setupTable()
+}
 
     func setupURLBar() {
         barView.translatesAutoresizingMaskIntoConstraints = false
@@ -99,9 +100,34 @@ class HomeViewController: UIViewController {
         pushWeb(url: url, title: url.host ?? raw)
     }
 
-    func pushWeb(url: URL, title: String) {
+  func pushWeb(url: URL, title: String) {
         let vc = WebViewController(url: url, pageTitle: title)
         navigationController?.pushViewController(vc, animated: true)
+    }
+
+    func setupBackground() {
+        let imageURL = "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1080"
+
+        let bgView = UIImageView(frame: view.bounds)
+        bgView.contentMode = .scaleAspectFill
+        bgView.clipsToBounds = true
+        bgView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let overlay = UIView(frame: view.bounds)
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        bgView.addSubview(overlay)
+
+        view.insertSubview(bgView, at: 0)
+
+        DispatchQueue.global().async {
+            guard let url = URL(string: imageURL),
+                  let data = try? Data(contentsOf: url),
+                  let img  = UIImage(data: data) else { return }
+            DispatchQueue.main.async {
+                bgView.image = img
+            }
+        }
     }
 }
 
