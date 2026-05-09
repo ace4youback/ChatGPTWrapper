@@ -4,8 +4,8 @@
 <dict>
     <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key><string>com.wrapper.chatgpt</string>
-    <key>CFBundleName</key><string>ChatGPT</string>
-    <key>CFBundleDisplayName</key><string>ChatGPT</string>
+    <key>CFBundleName</key><string>CustomBVK</string>
+    <key>CFBundleDisplayName</key><string>CustomBVK</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundlePackageType</key><string>APPL</string>
