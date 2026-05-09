@@ -2,30 +2,61 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key><string>com.wrapper.chatgpt</string>
-    <key>CFBundleName</key><string>CustomBVK</string>
-    <key>CFBundleDisplayName</key><string>CustomBVK</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>LSRequiresIPhoneOS</key><true/>
-    <key>MinimumOSVersion</key><string>15.0</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.wrapper.chatgpt</string>
+
+    <key>CFBundleName</key>
+    <string>CustomBVK</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>CustomBVK</string>
+
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+
+    <key>MinimumOSVersion</key>
+    <string>15.0</string>
+
     <key>UIRequiredDeviceCapabilities</key>
-    <array><string>arm64</string></array>
+    <array>
+        <string>arm64</string>
+    </array>
+
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+
     <key>NSAppTransportSecurity</key>
-    <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
-    <key>UILaunchScreen</key><dict/>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+
+    <key>UILaunchScreen</key>
+    <dict/>
 
     <key>NSCameraUsageDescription</key>
     <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích</string>
+
     <key>NSMicrophoneUsageDescription</key>
     <string>Dùng microphone để nhập liệu giọng nói cho AI</string>
+
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Chọn ảnh từ thư viện làm hình nền ứng dụng</string>
 </dict>
 </plist>
