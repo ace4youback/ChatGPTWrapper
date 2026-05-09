@@ -297,17 +297,38 @@ class WebViewController: UIViewController {
         networkMonitor.start(queue: DispatchQueue(label: "NetworkMonitor"))
     }
 
-    // ✅ Fix #4: Sync cookie rồi mới load
+    // ✅ Lấy cookie từ Safari (HTTPCookieStorage.shared) → inject vào WKWebView
+    // Nếu đã đăng nhập Google/Facebook trên Safari → vào app là đăng nhập luôn
     func syncCookiesThenLoad() {
-        let store = WKWebsiteDataStore.default().httpCookieStore
-        store.getAllCookies { [weak self] cookies in
-            let group = DispatchGroup()
-            for cookie in cookies {
-                group.enter()
-                store.setCookie(cookie) { group.leave() }
+        let wkStore = WKWebsiteDataStore.default().httpCookieStore
+        let safariCookies = HTTPCookieStorage.shared.cookies ?? []
+        let group = DispatchGroup()
+
+        // Bước 1: Copy cookie Safari → WKWebView store
+        for cookie in safariCookies {
+            group.enter()
+            wkStore.setCookie(cookie) { group.leave() }
+        }
+
+        // Bước 2: Lấy cookie WKWebView hiện có → ghi ngược lại Safari để đồng bộ 2 chiều
+        group.enter()
+        wkStore.getAllCookies { existingCookies in
+            for cookie in existingCookies {
+                HTTPCookieStorage.shared.setCookie(cookie)
             }
-            group.notify(queue: .main) { [weak self] in
-                self?.loadPage()
+            group.leave()
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            self?.loadPage()
+        }
+    }
+
+    // ✅ Khi trang load xong → ghi cookie ngược lại Safari để lần sau dùng tiếp (session persistence)
+    func persistCookiesToSafari() {
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+            for cookie in cookies {
+                HTTPCookieStorage.shared.setCookie(cookie)
             }
         }
     }
@@ -352,6 +373,8 @@ extension WebViewController: WKNavigationDelegate {
         progressBar.isHidden = true
         progressBar.setProgress(0, animated: false)
         if let t = webView.title, !t.isEmpty { self.title = t }
+        // ✅ Mỗi khi load xong → lưu cookie ngược lại Safari để đồng bộ session
+        persistCookiesToSafari()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -602,19 +625,3 @@ class AboutViewController: UIViewController {
 }
 
 typealias ViewController = HomeViewController
-
-// ─────────────────────────────────────────
-// MARK: - Info.plist cần thêm (QUAN TRỌNG)
-// ─────────────────────────────────────────
-/*
- Thêm các key sau vào Info.plist để camera & microphone hoạt động:
-
- <key>NSCameraUsageDescription</key>
- <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích</string>
-
- <key>NSMicrophoneUsageDescription</key>
- <string>Dùng microphone để nhập liệu giọng nói cho AI</string>
-
- Nếu không có 2 key này, app sẽ crash ngay khi web AI
- yêu cầu quyền truy cập camera (đây là lý do bug #1).
- */
