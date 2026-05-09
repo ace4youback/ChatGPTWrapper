@@ -2,7 +2,7 @@ import UIKit
 import WebKit
 
 // ─────────────────────────────────────────
-// MARK: - Cấu hình AI Tools (thêm vào đây)
+// MARK: - Cấu hình AI Tools
 // ─────────────────────────────────────────
 struct AITools {
     static let list: [(name: String, url: String, emoji: String)] = [
@@ -26,14 +26,38 @@ class HomeViewController: UIViewController {
     private let goButton  = UIButton(type: .system)
     private var barView   = UIView()
 
-   override func viewDidLoad() {
-    super.viewDidLoad()
-    title = "CustomBVK"
-    view.backgroundColor = .systemBackground
-    setupBackground()
-    setupURLBar()
-    setupTable()
-}
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "CustomBVK"
+        view.backgroundColor = .systemBackground
+        setupBackground()
+        setupURLBar()
+        setupTable()
+    }
+
+    func setupBackground() {
+        // ✏️ Đổi link ảnh ở đây
+        let imageURL = "https://i.postimg.cc/d3Lc8BXV/6bada5a7c42244918513dff82b6b958d-tplv-jj85edgx6n-image-origin.jpg"
+
+        let bgView = UIImageView(frame: view.bounds)
+        bgView.contentMode = .scaleAspectFill
+        bgView.clipsToBounds = true
+        bgView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let overlay = UIView(frame: view.bounds)
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        bgView.addSubview(overlay)
+
+        view.insertSubview(bgView, at: 0)
+
+        DispatchQueue.global().async {
+            guard let url = URL(string: imageURL),
+                  let data = try? Data(contentsOf: url),
+                  let img  = UIImage(data: data) else { return }
+            DispatchQueue.main.async { bgView.image = img }
+        }
+    }
 
     func setupURLBar() {
         barView.translatesAutoresizingMaskIntoConstraints = false
@@ -81,6 +105,7 @@ class HomeViewController: UIViewController {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.delegate   = self
         tableView.dataSource = self
+        tableView.backgroundColor = .clear
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
         view.addSubview(tableView)
 
@@ -100,34 +125,9 @@ class HomeViewController: UIViewController {
         pushWeb(url: url, title: url.host ?? raw)
     }
 
-  func pushWeb(url: URL, title: String) {
+    func pushWeb(url: URL, title: String) {
         let vc = WebViewController(url: url, pageTitle: title)
         navigationController?.pushViewController(vc, animated: true)
-    }
-
-    func setupBackground() {
-        let imageURL = "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1080"
-
-        let bgView = UIImageView(frame: view.bounds)
-        bgView.contentMode = .scaleAspectFill
-        bgView.clipsToBounds = true
-        bgView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-
-        let overlay = UIView(frame: view.bounds)
-        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        bgView.addSubview(overlay)
-
-        view.insertSubview(bgView, at: 0)
-
-        DispatchQueue.global().async {
-            guard let url = URL(string: imageURL),
-                  let data = try? Data(contentsOf: url),
-                  let img  = UIImage(data: data) else { return }
-            DispatchQueue.main.async {
-                bgView.image = img
-            }
-        }
     }
 }
 
@@ -146,6 +146,7 @@ extension HomeViewController: UITableViewDelegate, UITableViewDataSource {
         cfg.secondaryTextProperties.font  = .systemFont(ofSize: 12)
         cell.contentConfiguration = cfg
         cell.accessoryType = .disclosureIndicator
+        cell.backgroundColor = UIColor.white.withAlphaComponent(0.15)
         return cell
     }
 
@@ -198,7 +199,6 @@ class WebViewController: UIViewController {
         cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.websiteDataStore = .default()
 
-        // Tắt các preference không cần để nhẹ hơn
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         cfg.defaultWebpagePreferences = prefs
@@ -210,13 +210,10 @@ class WebViewController: UIViewController {
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.decelerationRate = .normal
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
-
-        // User agent Safari thật — tránh bị chặn
         webView.customUserAgent =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) " +
             "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
             "Version/16.6 Mobile/15E148 Safari/604.1"
-
         view.addSubview(webView)
         view.bringSubviewToFront(progressBar)
     }
@@ -232,7 +229,6 @@ class WebViewController: UIViewController {
             progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 3),
         ])
-
         kvoToken = webView.observe(\.estimatedProgress, options: .new) { [weak self] wv, _ in
             DispatchQueue.main.async {
                 let p = Float(wv.estimatedProgress)
@@ -244,18 +240,12 @@ class WebViewController: UIViewController {
 
     func loadPage() {
         retryCount = 0
-        var req = URLRequest(url: url,
-                             cachePolicy: .returnCacheDataElseLoad,
-                             timeoutInterval: 25)
+        var req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 25)
         req.setValue(webView.customUserAgent, forHTTPHeaderField: "User-Agent")
         webView.load(req)
     }
 
-    @objc func reload() {
-        retryCount = 0
-        webView.reload()
-    }
-
+    @objc func reload() { retryCount = 0; webView.reload() }
     deinit { kvoToken?.invalidate() }
 }
 
@@ -266,7 +256,6 @@ extension WebViewController: WKNavigationDelegate {
         retryCount = 0
         progressBar.isHidden = true
         progressBar.setProgress(0, animated: false)
-        // Cập nhật title theo trang web thật
         if let t = webView.title, !t.isEmpty { self.title = t }
     }
 
@@ -281,27 +270,23 @@ extension WebViewController: WKNavigationDelegate {
 
     func handleError(_ error: Error) {
         progressBar.isHidden = true
-        // Tự retry 2 lần trước khi báo lỗi
         if retryCount < maxRetry {
             retryCount += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.webView.reload() }
             return
         }
-        let alert = UIAlertController(
-            title: "Không tải được 😕",
-            message: "Kiểm tra mạng rồi thử lại.\n\(error.localizedDescription)",
-            preferredStyle: .alert)
+        let alert = UIAlertController(title: "Không tải được 😕",
+                                      message: "Kiểm tra mạng rồi thử lại.",
+                                      preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { _ in self.loadPage() })
         alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
         present(alert, animated: true)
     }
 
-    func webView(_ webView: WKWebView,
-                 decidePolicyFor action: WKNavigationAction,
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        // Chặn URL không hợp lệ
         guard let url = action.request.url,
-              url.scheme == "https" || url.scheme == "http" || url.scheme == "about"
+              ["https","http","about"].contains(url.scheme ?? "")
         else { decisionHandler(.cancel); return }
         decisionHandler(.allow)
     }
@@ -309,7 +294,7 @@ extension WebViewController: WKNavigationDelegate {
 
 // MARK: WKUIDelegate
 extension WebViewController: WKUIDelegate {
-    // Hỗ trợ JS alert/confirm/prompt — không thì trang AI sẽ bị treo
+
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
@@ -325,14 +310,10 @@ extension WebViewController: WKUIDelegate {
         present(a, animated: true)
     }
 
-    func webView(_ webView: WKWebView,
-                 createWebViewWith configuration: WKWebViewConfiguration,
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        // Link mở tab mới → load trong webview hiện tại
-        if let url = navigationAction.request.url {
-            webView.load(URLRequest(url: url))
-        }
+        if let url = navigationAction.request.url { webView.load(URLRequest(url: url)) }
         return nil
     }
 }
@@ -392,26 +373,25 @@ class AboutViewController: UIViewController {
             icon.heightAnchor.constraint(equalToConstant: 72),
         ])
 
-        let appName = label("CustomBVK", size: 28, weight: .bold)
-        let version = label("Phiên bản 1.0 · iOS 15+", size: 13, color: .secondaryLabel)
+        let appName = lbl("CustomBVK", size: 28, weight: .bold)
+        let version = lbl("Phiên bản 1.0 · iOS 15+", size: 13, color: .secondaryLabel)
 
         // Card nhà phát triển
-        let devCard = card(width: view.frame.width - 40)
-        let devStack = vstack(spacing: 14)
+        let devCard = card()
+        let devStack = vstack(16)
         devCard.addSubview(devStack)
-        pin(devStack, to: devCard, inset: 18)
-        devStack.addArrangedSubview(label("👨‍💻  Nhà phát triển", size: 12, weight: .semibold, color: .systemBlue))
+        pin(devStack, to: devCard)
+        devStack.addArrangedSubview(lbl("👨‍💻  Nhà phát triển", size: 12, weight: .semibold, color: .systemBlue))
         devStack.addArrangedSubview(nameRow("🎓", "Văn Khoa"))
         devStack.addArrangedSubview(divider())
         devStack.addArrangedSubview(nameRow("🎓", "Cao Long"))
 
         // Card liên hệ
-        let contactCard = card(width: view.frame.width - 40)
-        let contactStack = vstack(spacing: 12)
+        let contactCard = card()
+        let contactStack = vstack(12)
         contactCard.addSubview(contactStack)
-        pin(contactStack, to: contactCard, inset: 18)
-        contactStack.addArrangedSubview(label("📬  Liên hệ", size: 12, weight: .semibold, color: .systemBlue))
-
+        pin(contactStack, to: contactCard)
+        contactStack.addArrangedSubview(lbl("📬  Liên hệ", size: 12, weight: .semibold, color: .systemBlue))
         let emailBtn = UIButton(type: .system)
         emailBtn.setTitle("✉️  tranvantrinhhd@gmail.com", for: .normal)
         emailBtn.titleLabel?.font = .systemFont(ofSize: 15)
@@ -419,9 +399,10 @@ class AboutViewController: UIViewController {
         emailBtn.addTarget(self, action: #selector(mailTap), for: .touchUpInside)
         contactStack.addArrangedSubview(emailBtn)
 
-        let copy = label("© 2025 Văn Khoa & Cao Long\nAll rights reserved.", size: 12,
-                         color: .tertiaryLabel, align: .center)
+        let copy = lbl("© 2025 Văn Khoa & Cao Long\nAll rights reserved.",
+                        size: 12, color: .tertiaryLabel)
         copy.numberOfLines = 0
+        copy.textAlignment = .center
 
         root.addArrangedSubview(avatarWrap)
         root.addArrangedSubview(appName)
@@ -433,18 +414,17 @@ class AboutViewController: UIViewController {
         root.addArrangedSubview(copy)
     }
 
-    // MARK: Helpers
-    func label(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular,
-                color: UIColor = .label, align: NSTextAlignment = .center) -> UILabel {
+    func lbl(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular,
+              color: UIColor = .label) -> UILabel {
         let l = UILabel()
-        l.text = text; l.font = .systemFont(ofSize: size, weight: weight)
-        l.textColor = color; l.textAlignment = align
+        l.text = text
+        l.font = .systemFont(ofSize: size, weight: weight)
+        l.textColor = color
         return l
     }
 
     func nameRow(_ emoji: String, _ name: String) -> UIStackView {
-        let s = UIStackView()
-        s.axis = .horizontal; s.spacing = 10
+        let s = UIStackView(); s.axis = .horizontal; s.spacing = 10
         let e = UILabel(); e.text = emoji; e.font = .systemFont(ofSize: 20)
         let n = UILabel(); n.text = name
         n.font = .systemFont(ofSize: 16, weight: .medium); n.textColor = .label
@@ -458,31 +438,31 @@ class AboutViewController: UIViewController {
         return v
     }
 
-    func card(width: CGFloat) -> UIView {
+    func card() -> UIView {
         let v = UIView()
         v.backgroundColor = .secondarySystemGroupedBackground
         v.layer.cornerRadius = 14
-        v.layer.shadowColor  = UIColor.black.cgColor
+        v.layer.shadowColor   = UIColor.black.cgColor
         v.layer.shadowOpacity = 0.05
         v.layer.shadowRadius  = 6
         v.layer.shadowOffset  = CGSize(width: 0, height: 2)
         v.translatesAutoresizingMaskIntoConstraints = false
-        v.widthAnchor.constraint(equalToConstant: width).isActive = true
+        v.widthAnchor.constraint(equalToConstant: UIScreen.main.bounds.width - 40).isActive = true
         return v
     }
 
-    func vstack(spacing: CGFloat) -> UIStackView {
+    func vstack(_ spacing: CGFloat) -> UIStackView {
         let s = UIStackView(); s.axis = .vertical; s.spacing = spacing
         s.translatesAutoresizingMaskIntoConstraints = false
         return s
     }
 
-    func pin(_ child: UIView, to parent: UIView, inset: CGFloat) {
+    func pin(_ child: UIView, to parent: UIView) {
         NSLayoutConstraint.activate([
-            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: inset),
-            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset),
-            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -inset),
-            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset),
+            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: 18),
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 18),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -18),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -18),
         ])
     }
 
