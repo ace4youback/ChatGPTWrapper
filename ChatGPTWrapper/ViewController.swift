@@ -5,14 +5,14 @@ import WebKit
 // MARK: - Cấu hình AI Tools
 // ─────────────────────────────────────────
 struct AITools {
-    static let list: [(name: String, url: String, emoji: String)] = [
-        ("ChatGPT",    "https://chat.openai.com",       "🤖"),
-        ("Claude",     "https://claude.ai",              "🧠"),
-        ("Gemini",     "https://gemini.google.com",      "✨"),
-        ("Copilot",    "https://copilot.microsoft.com",  "💡"),
-        ("Grok",       "https://grok.com",               "⚡"),
-        ("Perplexity", "https://perplexity.ai",          "🔍"),
-        ("DeepSeek",   "https://chat.deepseek.com",      "🌊"),
+    static let list: [(name: String, url: String)] = [
+        ("ChatGPT",    "https://chat.openai.com"),
+        ("Claude",     "https://claude.ai"),
+        ("Gemini",     "https://gemini.google.com"),
+        ("Copilot",    "https://copilot.microsoft.com"),
+        ("Grok",       "https://grok.com"),
+        ("Perplexity", "https://perplexity.ai"),
+        ("DeepSeek",   "https://chat.deepseek.com"),
     ]
 }
 
@@ -36,21 +36,16 @@ class HomeViewController: UIViewController {
     }
 
     func setupBackground() {
-        // ✏️ Đổi link ảnh ở đây
         let imageURL = "https://i.postimg.cc/d3Lc8BXV/6bada5a7c42244918513dff82b6b958d-tplv-jj85edgx6n-image-origin.jpg"
-
         let bgView = UIImageView(frame: view.bounds)
         bgView.contentMode = .scaleAspectFill
         bgView.clipsToBounds = true
         bgView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-
         let overlay = UIView(frame: view.bounds)
         overlay.backgroundColor = UIColor.black.withAlphaComponent(0.45)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         bgView.addSubview(overlay)
-
         view.insertSubview(bgView, at: 0)
-
         DispatchQueue.global().async {
             guard let url = URL(string: imageURL),
                   let data = try? Data(contentsOf: url),
@@ -63,7 +58,7 @@ class HomeViewController: UIViewController {
         barView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(barView)
 
-        urlField.placeholder = "Dán link AI bất kỳ vào đây..."
+        urlField.placeholder = "Dán link bất kỳ"
         urlField.borderStyle = .roundedRect
         urlField.keyboardType = .URL
         urlField.autocapitalizationType = .none
@@ -134,13 +129,14 @@ class HomeViewController: UIViewController {
 // MARK: TableView
 extension HomeViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tv: UITableView, numberOfRowsInSection s: Int) -> Int { AITools.list.count }
-    func tableView(_ tv: UITableView, titleForHeaderInSection s: Int) -> String? { "Chọn AI hoặc dán link bên trên ☝️" }
+    func tableView(_ tv: UITableView, titleForHeaderInSection s: Int) -> String? { "Chọn AI ☝️" }
 
     func tableView(_ tv: UITableView, cellForRowAt ip: IndexPath) -> UITableViewCell {
         let cell = tv.dequeueReusableCell(withIdentifier: "cell", for: ip)
         let t = AITools.list[ip.row]
         var cfg = cell.defaultContentConfiguration()
-        cfg.text = "\(t.emoji)  \(t.name)"
+        cfg.text = t.name
+        cfg.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
         cfg.secondaryText = t.url
         cfg.secondaryTextProperties.color = .systemGray
         cfg.secondaryTextProperties.font  = .systemFont(ofSize: 12)
@@ -163,7 +159,7 @@ extension HomeViewController: UITextFieldDelegate {
 }
 
 // ─────────────────────────────────────────
-// MARK: - WebViewController
+// MARK: - WebViewController (full màn hình)
 // ─────────────────────────────────────────
 class WebViewController: UIViewController {
 
@@ -178,6 +174,8 @@ class WebViewController: UIViewController {
     init(url: URL, pageTitle: String) {
         self.url = url; self.pageTitle = pageTitle
         super.init(nibName: nil, bundle: nil)
+        // Full screen — ẩn tab bar khi vào web
+        hidesBottomBarWhenPushed = true
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -185,9 +183,11 @@ class WebViewController: UIViewController {
         super.viewDidLoad()
         title = pageTitle
         view.backgroundColor = .systemBackground
+
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "arrow.clockwise"),
             style: .plain, target: self, action: #selector(reload))
+
         setupWebView()
         setupProgressBar()
         loadPage()
@@ -197,25 +197,45 @@ class WebViewController: UIViewController {
         let cfg = WKWebViewConfiguration()
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
-        cfg.websiteDataStore = .default()
+
+        // ✅ Lưu cookie & session — không bị logout
+        cfg.websiteDataStore = WKWebsiteDataStore.default()
+
+        // ✅ Shared cookie với Safari (lấy tài khoản Google đã đăng nhập)
+        cfg.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            for cookie in cookies {
+                cfg.websiteDataStore.httpCookieStore.setCookie(cookie) { }
+            }
+        }
 
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         cfg.defaultWebpagePreferences = prefs
 
-        webView = WKWebView(frame: view.bounds, configuration: cfg)
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // Layout full màn hình — edge to edge
+        webView = WKWebView(frame: .zero, configuration: cfg)
+        webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.decelerationRate = .normal
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+
+        // User agent Safari thật
         webView.customUserAgent =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) " +
             "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
             "Version/16.6 Mobile/15E148 Safari/604.1"
+
         view.addSubview(webView)
-        view.bringSubviewToFront(progressBar)
+
+        // ✅ Full màn hình — edge to edge kể cả safe area
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
     }
 
     func setupProgressBar() {
@@ -275,7 +295,7 @@ extension WebViewController: WKNavigationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.webView.reload() }
             return
         }
-        let alert = UIAlertController(title: "Không tải được 😕",
+        let alert = UIAlertController(title: "Không tải được",
                                       message: "Kiểm tra mạng rồi thử lại.",
                                       preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { _ in self.loadPage() })
@@ -355,7 +375,6 @@ class AboutViewController: UIViewController {
             root.widthAnchor.constraint(equalTo: scroll.widthAnchor, constant: -40),
         ])
 
-        // Avatar
         let avatarWrap = UIView()
         avatarWrap.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.1)
         avatarWrap.layer.cornerRadius = 52
@@ -376,31 +395,28 @@ class AboutViewController: UIViewController {
         let appName = lbl("CustomBVK", size: 28, weight: .bold)
         let version = lbl("Phiên bản 1.0 · iOS 15+", size: 13, color: .secondaryLabel)
 
-        // Card nhà phát triển
         let devCard = card()
         let devStack = vstack(16)
         devCard.addSubview(devStack)
         pin(devStack, to: devCard)
         devStack.addArrangedSubview(lbl("👨‍💻  Nhà phát triển", size: 12, weight: .semibold, color: .systemBlue))
-        devStack.addArrangedSubview(nameRow("🎓", "Văn Khoa"))
+        devStack.addArrangedSubview(nameRow("Văn Khoa"))
         devStack.addArrangedSubview(divider())
-        devStack.addArrangedSubview(nameRow("🎓", "Cao Long"))
+        devStack.addArrangedSubview(nameRow("Cao Long"))
 
-        // Card liên hệ
         let contactCard = card()
         let contactStack = vstack(12)
         contactCard.addSubview(contactStack)
         pin(contactStack, to: contactCard)
         contactStack.addArrangedSubview(lbl("📬  Liên hệ", size: 12, weight: .semibold, color: .systemBlue))
         let emailBtn = UIButton(type: .system)
-        emailBtn.setTitle("✉️  tranvantrinhhd@gmail.com", for: .normal)
+        emailBtn.setTitle("tranvantrinhhd@gmail.com", for: .normal)
         emailBtn.titleLabel?.font = .systemFont(ofSize: 15)
         emailBtn.contentHorizontalAlignment = .left
         emailBtn.addTarget(self, action: #selector(mailTap), for: .touchUpInside)
         contactStack.addArrangedSubview(emailBtn)
 
-        let copy = lbl("© 2025 Văn Khoa & Cao Long\nAll rights reserved.",
-                        size: 12, color: .tertiaryLabel)
+        let copy = lbl("© 2025 Văn Khoa & Cao Long\nAll rights reserved.", size: 12, color: .tertiaryLabel)
         copy.numberOfLines = 0
         copy.textAlignment = .center
 
@@ -414,21 +430,17 @@ class AboutViewController: UIViewController {
         root.addArrangedSubview(copy)
     }
 
-    func lbl(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular,
-              color: UIColor = .label) -> UILabel {
-        let l = UILabel()
-        l.text = text
-        l.font = .systemFont(ofSize: size, weight: weight)
-        l.textColor = color
+    func lbl(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = .label) -> UILabel {
+        let l = UILabel(); l.text = text
+        l.font = .systemFont(ofSize: size, weight: weight); l.textColor = color
         return l
     }
 
-    func nameRow(_ emoji: String, _ name: String) -> UIStackView {
+    func nameRow(_ name: String) -> UIStackView {
         let s = UIStackView(); s.axis = .horizontal; s.spacing = 10
-        let e = UILabel(); e.text = emoji; e.font = .systemFont(ofSize: 20)
         let n = UILabel(); n.text = name
         n.font = .systemFont(ofSize: 16, weight: .medium); n.textColor = .label
-        s.addArrangedSubview(e); s.addArrangedSubview(n)
+        s.addArrangedSubview(n)
         return s
     }
 
@@ -442,10 +454,10 @@ class AboutViewController: UIViewController {
         let v = UIView()
         v.backgroundColor = .secondarySystemGroupedBackground
         v.layer.cornerRadius = 14
-        v.layer.shadowColor   = UIColor.black.cgColor
+        v.layer.shadowColor = UIColor.black.cgColor
         v.layer.shadowOpacity = 0.05
-        v.layer.shadowRadius  = 6
-        v.layer.shadowOffset  = CGSize(width: 0, height: 2)
+        v.layer.shadowRadius = 6
+        v.layer.shadowOffset = CGSize(width: 0, height: 2)
         v.translatesAutoresizingMaskIntoConstraints = false
         v.widthAnchor.constraint(equalToConstant: UIScreen.main.bounds.width - 40).isActive = true
         return v
@@ -453,8 +465,7 @@ class AboutViewController: UIViewController {
 
     func vstack(_ spacing: CGFloat) -> UIStackView {
         let s = UIStackView(); s.axis = .vertical; s.spacing = spacing
-        s.translatesAutoresizingMaskIntoConstraints = false
-        return s
+        s.translatesAutoresizingMaskIntoConstraints = false; return s
     }
 
     func pin(_ child: UIView, to parent: UIView) {
@@ -473,5 +484,4 @@ class AboutViewController: UIViewController {
     }
 }
 
-// Alias
 typealias ViewController = HomeViewController
