@@ -1,20 +1,454 @@
 import UIKit
 import WebKit
-import Network   // ← Fix #3: check trạng thái mạng
+import Network
+import PhotosUI
 
 // ─────────────────────────────────────────
-// MARK: - Cấu hình AI Tools
+// MARK: - Design Tokens
 // ─────────────────────────────────────────
+extension UIColor {
+    static let accentBlue   = UIColor(red: 0.47, green: 0.71, blue: 1.00, alpha: 1)
+    static let cardBg       = UIColor.white.withAlphaComponent(0.07)
+    static let cardBorder   = UIColor.white.withAlphaComponent(0.10)
+    static let labelPrimary = UIColor.white
+    static let labelSub     = UIColor.white.withAlphaComponent(0.35)
+}
+
+// ─────────────────────────────────────────
+// MARK: - AI Tools
+// ─────────────────────────────────────────
+struct AITool {
+    let name: String
+    let url: String
+    let icon: String
+    let iconColor: UIColor
+    let iconBg: UIColor
+    let badge: String?
+}
+
 struct AITools {
-    static let list: [(name: String, url: String)] = [
-        ("ChatGPT",    "https://chat.openai.com"),
-        ("Claude",     "https://claude.ai"),
-        ("Gemini",     "https://gemini.google.com"),
-        ("Copilot",    "https://copilot.microsoft.com"),
-        ("Grok",       "https://grok.com"),
-        ("Perplexity", "https://perplexity.ai"),
-        ("DeepSeek",   "https://chat.deepseek.com"),
+    static let list: [AITool] = [
+        AITool(name: "ChatGPT",    url: "https://chat.openai.com",       icon: "message.fill",       iconColor: UIColor(red:0.06,green:0.64,blue:0.50,alpha:1), iconBg: UIColor(red:0.06,green:0.64,blue:0.50,alpha:0.18), badge: nil),
+        AITool(name: "Claude",     url: "https://claude.ai",             icon: "sparkles",           iconColor: UIColor(red:0.80,green:0.55,blue:0.35,alpha:1), iconBg: UIColor(red:0.80,green:0.55,blue:0.35,alpha:0.18), badge: "HOT"),
+        AITool(name: "Gemini",     url: "https://gemini.google.com",     icon: "diamond.fill",       iconColor: UIColor(red:0.26,green:0.52,blue:0.96,alpha:1), iconBg: UIColor(red:0.26,green:0.52,blue:0.96,alpha:0.18), badge: nil),
+        AITool(name: "Copilot",    url: "https://copilot.microsoft.com", icon: "cpu.fill",           iconColor: UIColor(red:0.00,green:0.47,blue:0.83,alpha:1), iconBg: UIColor(red:0.00,green:0.47,blue:0.83,alpha:0.18), badge: nil),
+        AITool(name: "Grok",       url: "https://grok.com",              icon: "bolt.fill",          iconColor: UIColor(red:0.85,green:0.85,blue:0.85,alpha:1), iconBg: UIColor.white.withAlphaComponent(0.10),             badge: nil),
+        AITool(name: "Perplexity", url: "https://perplexity.ai",         icon: "magnifyingglass",    iconColor: UIColor(red:0.13,green:0.72,blue:0.73,alpha:1), iconBg: UIColor(red:0.13,green:0.72,blue:0.73,alpha:0.18), badge: nil),
+        AITool(name: "DeepSeek",   url: "https://chat.deepseek.com",     icon: "brain.head.profile", iconColor: UIColor(red:0.47,green:0.39,blue:1.00,alpha:1), iconBg: UIColor(red:0.47,green:0.39,blue:1.00,alpha:0.18), badge: nil),
     ]
+}
+
+// ─────────────────────────────────────────
+// MARK: - WallpaperManager
+// ─────────────────────────────────────────
+final class WallpaperManager {
+    static let shared = WallpaperManager()
+    private let keyWP  = "bvk_wallpaper_v1"
+    private let keyDim = "bvk_dim_v1"
+
+    let presets: [(name: String, start: UIColor, end: UIColor)] = [
+        ("Vũ trụ",    UIColor(red:0.05,green:0.06,blue:0.10,alpha:1), UIColor(red:0.10,green:0.06,blue:0.18,alpha:1)),
+        ("Đại dương", UIColor(red:0.00,green:0.12,blue:0.25,alpha:1), UIColor(red:0.00,green:0.20,blue:0.30,alpha:1)),
+        ("Hoàng hôn", UIColor(red:0.10,green:0.04,blue:0.00,alpha:1), UIColor(red:0.24,green:0.10,blue:0.10,alpha:1)),
+        ("Rừng đêm",  UIColor(red:0.00,green:0.10,blue:0.00,alpha:1), UIColor(red:0.04,green:0.10,blue:0.04,alpha:1)),
+        ("Than hoa",  UIColor(red:0.05,green:0.05,blue:0.05,alpha:1), UIColor(red:0.10,green:0.10,blue:0.10,alpha:1)),
+        ("Tím lạnh",  UIColor(red:0.05,green:0.00,blue:0.10,alpha:1), UIColor(red:0.10,green:0.00,blue:0.24,alpha:1)),
+    ]
+
+    var savedKey: String {
+        get { UserDefaults.standard.string(forKey: keyWP) ?? "preset:0" }
+        set { UserDefaults.standard.set(newValue, forKey: keyWP) }
+    }
+    var savedDim: Float {
+        get { UserDefaults.standard.object(forKey: keyDim) == nil ? 0.45 : UserDefaults.standard.float(forKey: keyDim) }
+        set { UserDefaults.standard.set(newValue, forKey: keyDim) }
+    }
+
+    func saveCustomImage(_ image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+        try? data.write(to: customURL)
+        savedKey = "custom"
+    }
+    func loadCustomImage() -> UIImage? {
+        guard let data = try? Data(contentsOf: customURL) else { return nil }
+        return UIImage(data: data)
+    }
+    private var customURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("bvk_wallpaper.jpg")
+    }
+}
+
+// ─────────────────────────────────────────
+// MARK: - GradientBackgroundView
+// ─────────────────────────────────────────
+final class GradientBackgroundView: UIView {
+    private let gradientLayer = CAGradientLayer()
+    private let imageView     = UIImageView()
+    private let dimView       = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        gradientLayer.startPoint = CGPoint(x: 0.2, y: 0)
+        gradientLayer.endPoint   = CGPoint(x: 0.8, y: 1)
+        layer.addSublayer(gradientLayer)
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.alpha = 0
+        addSubview(imageView)
+        dimView.backgroundColor = .black
+        addSubview(dimView)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradientLayer.frame = bounds
+        imageView.frame = bounds
+        dimView.frame = bounds
+    }
+
+    func applyPreset(index: Int, dim: Float) {
+        guard index < WallpaperManager.shared.presets.count else { return }
+        let p = WallpaperManager.shared.presets[index]
+        gradientLayer.colors = [p.start.cgColor, p.end.cgColor]
+        UIView.animate(withDuration: 0.4) { self.imageView.alpha = 0 }
+        dimView.alpha = CGFloat(dim)
+    }
+
+    func applyCustomImage(_ image: UIImage, dim: Float) {
+        imageView.image = image
+        UIView.animate(withDuration: 0.4) { self.imageView.alpha = 1 }
+        dimView.alpha = CGFloat(dim)
+    }
+
+    func applyDim(_ dim: Float) { dimView.alpha = CGFloat(dim) }
+
+    func applySaved() {
+        let wm = WallpaperManager.shared
+        let dim = wm.savedDim
+        if wm.savedKey == "custom", let img = wm.loadCustomImage() {
+            applyCustomImage(img, dim: dim)
+        } else if wm.savedKey.hasPrefix("preset:"),
+                  let idx = Int(wm.savedKey.dropFirst(7)) {
+            applyPreset(index: idx, dim: dim)
+        } else {
+            applyPreset(index: 0, dim: dim)
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+// MARK: - AITableViewCell
+// ─────────────────────────────────────────
+final class AITableViewCell: UITableViewCell {
+    private let cardView   = UIView()
+    private let iconWrap   = UIView()
+    private let iconImage  = UIImageView()
+    private let nameLabel  = UILabel()
+    private let urlLabel   = UILabel()
+    private let badgeLabel = UILabel()
+    private let chevron    = UIImageView(image: UIImage(systemName: "chevron.right"))
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .clear
+        selectionStyle  = .none
+
+        cardView.backgroundColor = .cardBg
+        cardView.layer.cornerRadius = 16
+        cardView.layer.borderWidth  = 0.5
+        cardView.layer.borderColor  = UIColor.cardBorder.cgColor
+        cardView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(cardView)
+
+        iconWrap.layer.cornerRadius = 12
+        iconWrap.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(iconWrap)
+
+        iconImage.contentMode = .scaleAspectFit
+        iconImage.translatesAutoresizingMaskIntoConstraints = false
+        iconWrap.addSubview(iconImage)
+
+        nameLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        nameLabel.textColor = .labelPrimary
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        urlLabel.font = .systemFont(ofSize: 12)
+        urlLabel.textColor = .labelSub
+        urlLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        badgeLabel.font = .systemFont(ofSize: 10, weight: .bold)
+        badgeLabel.textColor = .accentBlue
+        badgeLabel.backgroundColor = UIColor.accentBlue.withAlphaComponent(0.18)
+        badgeLabel.layer.cornerRadius = 5
+        badgeLabel.layer.masksToBounds = true
+        badgeLabel.textAlignment = .center
+        badgeLabel.isHidden = true
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        chevron.tintColor = UIColor.white.withAlphaComponent(0.18)
+        chevron.contentMode = .scaleAspectFit
+        chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+
+        let textStack = UIStackView(arrangedSubviews: [nameLabel, urlLabel])
+        textStack.axis = .vertical; textStack.spacing = 2
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+
+        cardView.addSubview(textStack)
+        cardView.addSubview(badgeLabel)
+        cardView.addSubview(chevron)
+
+        NSLayoutConstraint.activate([
+            cardView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
+            cardView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
+            cardView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            cardView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+
+            iconWrap.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 13),
+            iconWrap.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            iconWrap.widthAnchor.constraint(equalToConstant: 40),
+            iconWrap.heightAnchor.constraint(equalToConstant: 40),
+
+            iconImage.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
+            iconImage.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
+            iconImage.widthAnchor.constraint(equalToConstant: 20),
+            iconImage.heightAnchor.constraint(equalToConstant: 20),
+
+            textStack.leadingAnchor.constraint(equalTo: iconWrap.trailingAnchor, constant: 12),
+            textStack.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: badgeLabel.leadingAnchor, constant: -8),
+
+            badgeLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -8),
+            badgeLabel.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            badgeLabel.widthAnchor.constraint(equalToConstant: 34),
+            badgeLabel.heightAnchor.constraint(equalToConstant: 18),
+
+            chevron.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -14),
+            chevron.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 12),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(with tool: AITool) {
+        nameLabel.text = tool.name
+        urlLabel.text  = tool.url.replacingOccurrences(of: "https://", with: "")
+        iconImage.image = UIImage(systemName: tool.icon)
+        iconImage.tintColor = tool.iconColor
+        iconWrap.backgroundColor = tool.iconBg
+        if let badge = tool.badge {
+            badgeLabel.text = badge
+            badgeLabel.isHidden = false
+        } else {
+            badgeLabel.isHidden = true
+        }
+    }
+
+    override func setHighlighted(_ highlighted: Bool, animated: Bool) {
+        super.setHighlighted(highlighted, animated: animated)
+        UIView.animate(withDuration: 0.12) {
+            self.cardView.alpha = highlighted ? 0.55 : 1.0
+            self.cardView.transform = highlighted ? CGAffineTransform(scaleX: 0.97, y: 0.97) : .identity
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+// MARK: - WallpaperPickerViewController
+// ─────────────────────────────────────────
+protocol WallpaperPickerDelegate: AnyObject {
+    func wallpaperDidSelectPreset(_ index: Int)
+    func wallpaperDidSelectCustom(_ image: UIImage)
+    func wallpaperDidChangeDim(_ value: Float)
+}
+
+final class WallpaperPickerViewController: UIViewController {
+    weak var delegate: WallpaperPickerDelegate?
+    private var selectedPreset: Int = -1
+    private var dimValue: Float = WallpaperManager.shared.savedDim
+    private var thumbViews: [UIView] = []
+    private let dimSlider = UISlider()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor(red:0.09,green:0.10,blue:0.13,alpha:0.98)
+        view.layer.cornerRadius = 28
+        view.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        buildUI()
+        // Restore current selection
+        let key = WallpaperManager.shared.savedKey
+        if key.hasPrefix("preset:"), let i = Int(key.dropFirst(7)) { highlight(i) }
+    }
+
+    private func buildUI() {
+        // Handle bar
+        let handle = UIView()
+        handle.backgroundColor = UIColor.white.withAlphaComponent(0.22)
+        handle.layer.cornerRadius = 2.5
+        handle.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(handle)
+
+        // Title
+        let titleLbl = UILabel()
+        titleLbl.text = "Hình nền"
+        titleLbl.font = .systemFont(ofSize: 17, weight: .bold)
+        titleLbl.textColor = .white
+        titleLbl.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(titleLbl)
+
+        // Preset grid (2 rows × 3 cols)
+        let grid = UIStackView()
+        grid.axis = .horizontal; grid.spacing = 10; grid.distribution = .fillEqually
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        let wm = WallpaperManager.shared
+        for (i, preset) in wm.presets.enumerated() {
+            let col = UIStackView(); col.axis = .vertical; col.spacing = 5; col.alignment = .center
+            let thumb = UIView()
+            thumb.layer.cornerRadius = 12; thumb.layer.masksToBounds = true
+            thumb.tag = i
+            let gl = CAGradientLayer()
+            gl.colors = [preset.start.cgColor, preset.end.cgColor]
+            gl.startPoint = CGPoint(x:0.2,y:0); gl.endPoint = CGPoint(x:0.8,y:1)
+            thumb.layer.addSublayer(gl)
+            thumb.heightAnchor.constraint(equalTo: thumb.widthAnchor, multiplier: 0.75).isActive = true
+            let lbl = UILabel()
+            lbl.text = preset.name; lbl.font = .systemFont(ofSize: 10, weight: .medium)
+            lbl.textColor = UIColor.white.withAlphaComponent(0.45); lbl.textAlignment = .center
+            col.addArrangedSubview(thumb)
+            col.addArrangedSubview(lbl)
+            let tap = UITapGestureRecognizer(target: self, action: #selector(presetTapped(_:)))
+            thumb.addGestureRecognizer(tap)
+            thumbViews.append(thumb)
+            grid.addArrangedSubview(col)
+            DispatchQueue.main.async { gl.frame = thumb.bounds }
+        }
+        view.addSubview(grid)
+
+        // Dim slider row
+        let sunL = UIImageView(image: UIImage(systemName: "sun.min.fill"))
+        sunL.tintColor = UIColor.white.withAlphaComponent(0.35)
+        sunL.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 13)
+        let sunR = UIImageView(image: UIImage(systemName: "sun.max.fill"))
+        sunR.tintColor = UIColor.white.withAlphaComponent(0.75)
+        sunR.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 17)
+        dimSlider.minimumValue = 0; dimSlider.maximumValue = 0.75; dimSlider.value = dimValue
+        dimSlider.tintColor = .accentBlue
+        dimSlider.addTarget(self, action: #selector(dimChanged), for: .valueChanged)
+        let dimRow = UIStackView(arrangedSubviews: [sunL, dimSlider, sunR])
+        dimRow.axis = .horizontal; dimRow.spacing = 10; dimRow.alignment = .center
+        dimRow.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(dimRow)
+
+        // Photo picker button
+        var photoCfg = UIButton.Configuration.filled()
+        photoCfg.title = "Tải ảnh từ thư viện"
+        photoCfg.image = UIImage(systemName: "photo.on.rectangle")
+        photoCfg.imagePadding = 8
+        photoCfg.baseBackgroundColor = UIColor.white.withAlphaComponent(0.08)
+        photoCfg.baseForegroundColor = UIColor.white.withAlphaComponent(0.65)
+        photoCfg.cornerStyle = .large
+        let photoBtn = UIButton(type: .system)
+        photoBtn.configuration = photoCfg
+        photoBtn.layer.borderWidth = 0.5
+        photoBtn.layer.borderColor = UIColor.white.withAlphaComponent(0.14).cgColor
+        photoBtn.layer.cornerRadius = 14
+        photoBtn.addTarget(self, action: #selector(pickPhoto), for: .touchUpInside)
+        photoBtn.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(photoBtn)
+
+        // Done button
+        var doneCfg = UIButton.Configuration.filled()
+        doneCfg.title = "Xong"
+        doneCfg.cornerStyle = .large
+        doneCfg.baseBackgroundColor = .accentBlue
+        doneCfg.baseForegroundColor = .white
+        let doneBtn = UIButton(type: .system)
+        doneBtn.configuration = doneCfg
+        doneBtn.addTarget(self, action: #selector(done), for: .touchUpInside)
+        doneBtn.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(doneBtn)
+
+        NSLayoutConstraint.activate([
+            handle.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            handle.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            handle.widthAnchor.constraint(equalToConstant: 40),
+            handle.heightAnchor.constraint(equalToConstant: 5),
+
+            titleLbl.topAnchor.constraint(equalTo: handle.bottomAnchor, constant: 14),
+            titleLbl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+
+            grid.topAnchor.constraint(equalTo: titleLbl.bottomAnchor, constant: 16),
+            grid.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            grid.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            dimRow.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 18),
+            dimRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            dimRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            photoBtn.topAnchor.constraint(equalTo: dimRow.bottomAnchor, constant: 16),
+            photoBtn.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            photoBtn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            photoBtn.heightAnchor.constraint(equalToConstant: 46),
+
+            doneBtn.topAnchor.constraint(equalTo: photoBtn.bottomAnchor, constant: 10),
+            doneBtn.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            doneBtn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            doneBtn.heightAnchor.constraint(equalToConstant: 50),
+            doneBtn.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+        ])
+    }
+
+    private func highlight(_ index: Int) {
+        selectedPreset = index
+        for (i, t) in thumbViews.enumerated() {
+            t.layer.borderWidth = (i == index) ? 2 : 0
+            t.layer.borderColor = UIColor.accentBlue.cgColor
+        }
+    }
+
+    @objc private func presetTapped(_ tap: UITapGestureRecognizer) {
+        guard let v = tap.view else { return }
+        highlight(v.tag)
+        WallpaperManager.shared.savedKey = "preset:\(v.tag)"
+        delegate?.wallpaperDidSelectPreset(v.tag)
+    }
+
+    @objc private func dimChanged() {
+        dimValue = dimSlider.value
+        WallpaperManager.shared.savedDim = dimValue
+        delegate?.wallpaperDidChangeDim(dimValue)
+    }
+
+    @objc private func pickPhoto() {
+        var cfg = PHPickerConfiguration()
+        cfg.selectionLimit = 1; cfg.filter = .images
+        let picker = PHPickerViewController(configuration: cfg)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    @objc private func done() {
+        WallpaperManager.shared.savedDim = dimValue
+        dismiss(animated: true)
+    }
+}
+
+extension WallpaperPickerViewController: PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        guard let provider = results.first?.itemProvider,
+              provider.canLoadObject(ofClass: UIImage.self) else { return }
+        provider.loadObject(ofClass: UIImage.self) { [weak self] obj, _ in
+            guard let self = self, let image = obj as? UIImage else { return }
+            WallpaperManager.shared.saveCustomImage(image)
+            DispatchQueue.main.async {
+                for t in self.thumbViews { t.layer.borderWidth = 0 }
+                self.delegate?.wallpaperDidSelectCustom(image)
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────
@@ -22,110 +456,213 @@ struct AITools {
 // ─────────────────────────────────────────
 class HomeViewController: UIViewController {
 
-    private let tableView = UITableView(frame: .zero, style: .insetGrouped)
-    private let urlField  = UITextField()
-    private let goButton  = UIButton(type: .system)
-    private var barView   = UIView()
+    private let bgView        = GradientBackgroundView()
+    private let tableView     = UITableView(frame: .zero, style: .plain)
+    private let urlContainer  = UIView()
+    private let urlField      = UITextField()
+    private let goButton      = UIButton(type: .system)
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "CustomBVK"
-        view.backgroundColor = .systemBackground
+        navigationController?.setNavigationBarHidden(true, animated: false)
+        view.backgroundColor = .black
         setupBackground()
+        setupHeader()
         setupURLBar()
         setupTable()
     }
 
-    func setupBackground() {
-        let imageURL = "https://i.postimg.cc/d3Lc8BXV/6bada5a7c42244918513dff82b6b958d-tplv-jj85edgx6n-image-origin.jpg"
-        let bgView = UIImageView(frame: view.bounds)
-        bgView.contentMode = .scaleAspectFill
-        bgView.clipsToBounds = true
+    // MARK: Background
+    private func setupBackground() {
+        bgView.frame = view.bounds
         bgView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        let overlay = UIView(frame: view.bounds)
-        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        bgView.addSubview(overlay)
         view.insertSubview(bgView, at: 0)
-
-        // ✅ Fix: Dùng URLSession thay Data(contentsOf:)
-        // URLSession tự cache ảnh vào disk — lần sau mở app không tải lại
-        guard let url = URL(string: imageURL) else { return }
-        let req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            guard let data = data, let img = UIImage(data: data) else { return }
-            DispatchQueue.main.async { bgView.image = img }
-        }.resume()
+        bgView.applySaved()
     }
 
-    func setupURLBar() {
-        barView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(barView)
+    // MARK: Header
+    private var headerView = UIView()
 
-        urlField.placeholder = "Dán link bất kỳ"
-        urlField.borderStyle = .roundedRect
+    private func setupHeader() {
+        headerView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerView)
+
+        let attr = NSMutableAttributedString(
+            string: "Custom",
+            attributes: [.font: UIFont.systemFont(ofSize: 26, weight: .bold), .foregroundColor: UIColor.white])
+        attr.append(NSAttributedString(
+            string: "BVK",
+            attributes: [.font: UIFont.systemFont(ofSize: 26, weight: .bold), .foregroundColor: UIColor.accentBlue]))
+        let titleLbl = UILabel()
+        titleLbl.attributedText = attr
+        titleLbl.translatesAutoresizingMaskIntoConstraints = false
+        headerView.addSubview(titleLbl)
+
+        // Wallpaper btn
+        let wpBtn = iconButton(systemName: "photo.circle.fill", size: 28)
+        wpBtn.addTarget(self, action: #selector(openWallpaper), for: .touchUpInside)
+        headerView.addSubview(wpBtn)
+
+        // About btn
+        let aboutBtn = iconButton(systemName: "person.circle.fill", size: 28)
+        aboutBtn.addTarget(self, action: #selector(openAbout), for: .touchUpInside)
+        headerView.addSubview(aboutBtn)
+
+        NSLayoutConstraint.activate([
+            headerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
+            headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
+            headerView.heightAnchor.constraint(equalToConstant: 44),
+
+            titleLbl.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+            titleLbl.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+
+            aboutBtn.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
+            aboutBtn.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            aboutBtn.widthAnchor.constraint(equalToConstant: 36),
+            aboutBtn.heightAnchor.constraint(equalToConstant: 36),
+
+            wpBtn.trailingAnchor.constraint(equalTo: aboutBtn.leadingAnchor, constant: -6),
+            wpBtn.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            wpBtn.widthAnchor.constraint(equalToConstant: 36),
+            wpBtn.heightAnchor.constraint(equalToConstant: 36),
+        ])
+    }
+
+    private func iconButton(systemName: String, size: CGFloat) -> UIButton {
+        let btn = UIButton(type: .system)
+        btn.setImage(UIImage(systemName: systemName,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: .regular)), for: .normal)
+        btn.tintColor = UIColor.white.withAlphaComponent(0.65)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        return btn
+    }
+
+    // MARK: URL Bar
+    private func setupURLBar() {
+        urlContainer.backgroundColor = UIColor.white.withAlphaComponent(0.09)
+        urlContainer.layer.cornerRadius = 14
+        urlContainer.layer.borderWidth  = 0.5
+        urlContainer.layer.borderColor  = UIColor.white.withAlphaComponent(0.14).cgColor
+        urlContainer.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(urlContainer)
+
+        let linkIcon = UIImageView(image: UIImage(systemName: "link",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)))
+        linkIcon.tintColor = UIColor.white.withAlphaComponent(0.28)
+        linkIcon.contentMode = .scaleAspectFit
+        linkIcon.translatesAutoresizingMaskIntoConstraints = false
+        urlContainer.addSubview(linkIcon)
+
         urlField.keyboardType = .URL
         urlField.autocapitalizationType = .none
         urlField.autocorrectionType = .no
         urlField.returnKeyType = .go
         urlField.clearButtonMode = .whileEditing
         urlField.delegate = self
+        urlField.textColor = .white
+        urlField.tintColor = .accentBlue
+        urlField.attributedPlaceholder = NSAttributedString(
+            string: "Dán link bất kỳ…",
+            attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.28)])
         urlField.translatesAutoresizingMaskIntoConstraints = false
+        urlContainer.addSubview(urlField)
 
-        var btnConfig = UIButton.Configuration.filled()
-        btnConfig.title = "Mở"
-        btnConfig.cornerStyle = .medium
-        goButton.configuration = btnConfig
+        urlField.addTarget(self, action: #selector(urlFocused), for: .editingDidBegin)
+        urlField.addTarget(self, action: #selector(urlBlurred), for: .editingDidEnd)
+
+        var goConfig = UIButton.Configuration.filled()
+        goConfig.image = UIImage(systemName: "arrow.right",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold))
+        goConfig.baseBackgroundColor = .accentBlue
+        goConfig.baseForegroundColor = .white
+        goConfig.cornerStyle = .medium
+        goButton.configuration = goConfig
         goButton.addTarget(self, action: #selector(openURL), for: .touchUpInside)
         goButton.translatesAutoresizingMaskIntoConstraints = false
-
-        barView.addSubview(urlField)
-        barView.addSubview(goButton)
+        view.addSubview(goButton)
 
         NSLayoutConstraint.activate([
-            barView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
-            barView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            barView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            barView.heightAnchor.constraint(equalToConstant: 44),
+            urlContainer.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12),
+            urlContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            urlContainer.trailingAnchor.constraint(equalTo: goButton.leadingAnchor, constant: -8),
+            urlContainer.heightAnchor.constraint(equalToConstant: 46),
 
-            urlField.leadingAnchor.constraint(equalTo: barView.leadingAnchor),
-            urlField.centerYAnchor.constraint(equalTo: barView.centerYAnchor),
-            urlField.trailingAnchor.constraint(equalTo: goButton.leadingAnchor, constant: -8),
-            urlField.heightAnchor.constraint(equalToConstant: 40),
+            linkIcon.leadingAnchor.constraint(equalTo: urlContainer.leadingAnchor, constant: 12),
+            linkIcon.centerYAnchor.constraint(equalTo: urlContainer.centerYAnchor),
+            linkIcon.widthAnchor.constraint(equalToConstant: 16),
 
-            goButton.trailingAnchor.constraint(equalTo: barView.trailingAnchor),
-            goButton.centerYAnchor.constraint(equalTo: barView.centerYAnchor),
-            goButton.widthAnchor.constraint(equalToConstant: 56),
-            goButton.heightAnchor.constraint(equalToConstant: 36),
+            urlField.leadingAnchor.constraint(equalTo: linkIcon.trailingAnchor, constant: 8),
+            urlField.trailingAnchor.constraint(equalTo: urlContainer.trailingAnchor, constant: -8),
+            urlField.topAnchor.constraint(equalTo: urlContainer.topAnchor),
+            urlField.bottomAnchor.constraint(equalTo: urlContainer.bottomAnchor),
+
+            goButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            goButton.centerYAnchor.constraint(equalTo: urlContainer.centerYAnchor),
+            goButton.widthAnchor.constraint(equalToConstant: 46),
+            goButton.heightAnchor.constraint(equalToConstant: 46),
         ])
     }
 
-    func setupTable() {
-        tableView.translatesAutoresizingMaskIntoConstraints = false
+    @objc private func urlFocused() {
+        UIView.animate(withDuration: 0.2) {
+            self.urlContainer.layer.borderColor = UIColor.accentBlue.withAlphaComponent(0.55).cgColor
+            self.urlContainer.backgroundColor = UIColor.white.withAlphaComponent(0.12)
+        }
+    }
+    @objc private func urlBlurred() {
+        UIView.animate(withDuration: 0.2) {
+            self.urlContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.14).cgColor
+            self.urlContainer.backgroundColor = UIColor.white.withAlphaComponent(0.09)
+        }
+    }
+
+    // MARK: Table
+    private func setupTable() {
+        tableView.backgroundColor = .clear
+        tableView.separatorStyle  = .none
+        tableView.rowHeight = 64
+        tableView.showsVerticalScrollIndicator = false
+        tableView.keyboardDismissMode = .onDrag
+        tableView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0)
         tableView.delegate   = self
         tableView.dataSource = self
-        tableView.backgroundColor = .clear
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
-        // ✅ Fix UX: Cuộn table → bàn phím tự ẩn
-        tableView.keyboardDismissMode = .onDrag
+        tableView.register(AITableViewCell.self, forCellReuseIdentifier: "AICell")
+        tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
 
+        // Section header
+        let headerH = UIView(frame: CGRect(x:0,y:0,width:UIScreen.main.bounds.width,height:38))
+        let secLbl = UILabel()
+        secLbl.text = "CHỌN LINK"
+        secLbl.font = .systemFont(ofSize: 11, weight: .semibold)
+        secLbl.textColor = UIColor.white.withAlphaComponent(0.32)
+        let kern: CGFloat = 1.0
+        let attr = NSAttributedString(string: "CHỌN LINK", attributes: [
+            .kern: kern, .font: secLbl.font as Any, .foregroundColor: secLbl.textColor as Any])
+        secLbl.attributedText = attr
+        secLbl.translatesAutoresizingMaskIntoConstraints = false
+        headerH.addSubview(secLbl)
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: barView.bottomAnchor, constant: 8),
+            secLbl.leadingAnchor.constraint(equalTo: headerH.leadingAnchor, constant: 20),
+            secLbl.centerYAnchor.constraint(equalTo: headerH.centerYAnchor),
+        ])
+        tableView.tableHeaderView = headerH
+
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: urlContainer.bottomAnchor, constant: 4),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        // ✅ Fix UX: Tap vào vùng trống ngoài bàn phím → ẩn bàn phím
         let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tap.cancelsTouchesInView = false
         view.addGestureRecognizer(tap)
     }
 
-    @objc func dismissKeyboard() {
-        view.endEditing(true)
-    }
+    // MARK: Actions
+    @objc private func dismissKeyboard() { view.endEditing(true) }
 
     @objc func openURL() {
         guard var raw = urlField.text?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return }
@@ -135,34 +672,54 @@ class HomeViewController: UIViewController {
         pushWeb(url: url, title: url.host ?? raw)
     }
 
+    @objc private func openWallpaper() {
+        let vc = WallpaperPickerViewController()
+        vc.delegate = self
+        vc.modalPresentationStyle = .pageSheet
+        if let sheet = vc.sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberVisible = false
+            sheet.preferredCornerRadius = 28
+        }
+        present(vc, animated: true)
+    }
+
+    @objc private func openAbout() {
+        let vc = AboutViewController()
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
+    }
+
     func pushWeb(url: URL, title: String) {
         let vc = WebViewController(url: url, pageTitle: title)
         navigationController?.pushViewController(vc, animated: true)
     }
 }
 
+// MARK: WallpaperPickerDelegate
+extension HomeViewController: WallpaperPickerDelegate {
+    func wallpaperDidSelectPreset(_ index: Int) {
+        bgView.applyPreset(index: index, dim: WallpaperManager.shared.savedDim)
+    }
+    func wallpaperDidSelectCustom(_ image: UIImage) {
+        bgView.applyCustomImage(image, dim: WallpaperManager.shared.savedDim)
+    }
+    func wallpaperDidChangeDim(_ value: Float) {
+        bgView.applyDim(value)
+    }
+}
+
 // MARK: TableView
 extension HomeViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tv: UITableView, numberOfRowsInSection s: Int) -> Int { AITools.list.count }
-    func tableView(_ tv: UITableView, titleForHeaderInSection s: Int) -> String? { "Chọn AI ☝️" }
-
     func tableView(_ tv: UITableView, cellForRowAt ip: IndexPath) -> UITableViewCell {
-        let cell = tv.dequeueReusableCell(withIdentifier: "cell", for: ip)
-        let t = AITools.list[ip.row]
-        var cfg = cell.defaultContentConfiguration()
-        cfg.text = t.name
-        cfg.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
-        cfg.secondaryText = t.url
-        cfg.secondaryTextProperties.color = .systemGray
-        cfg.secondaryTextProperties.font  = .systemFont(ofSize: 12)
-        cell.contentConfiguration = cfg
-        cell.accessoryType = .disclosureIndicator
-        cell.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        let cell = tv.dequeueReusableCell(withIdentifier: "AICell", for: ip) as! AITableViewCell
+        cell.configure(with: AITools.list[ip.row])
         return cell
     }
-
     func tableView(_ tv: UITableView, didSelectRowAt ip: IndexPath) {
-        tv.deselectRow(at: ip, animated: true)
+        tv.deselectRow(at: ip, animated: false)
         let t = AITools.list[ip.row]
         pushWeb(url: URL(string: t.url)!, title: t.name)
     }
@@ -174,20 +731,18 @@ extension HomeViewController: UITextFieldDelegate {
 }
 
 // ─────────────────────────────────────────
-// MARK: - WebViewController (full màn hình)
+// MARK: - WebViewController
 // ─────────────────────────────────────────
 class WebViewController: UIViewController {
 
     private var webView: WKWebView!
-    private let progressBar = UIProgressView(progressViewStyle: .bar)
+    private let progressBar  = UIProgressView(progressViewStyle: .bar)
     private var kvoToken: NSKeyValueObservation?
-    private var retryCount = 0
-    private let maxRetry   = 2
+    private var retryCount   = 0
+    private let maxRetry     = 2
     private let url: URL
     private let pageTitle: String
-
-    // ✅ Fix #3: Network monitor để check mạng
-    private let networkMonitor = NWPathMonitor()
+    private let networkMonitor   = NWPathMonitor()
     private var isNetworkAvailable = true
 
     init(url: URL, pageTitle: String) {
@@ -200,22 +755,18 @@ class WebViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = pageTitle
-        view.backgroundColor = .systemBackground
-
+        view.backgroundColor = .black
+        navigationController?.setNavigationBarHidden(false, animated: false)
+        navigationController?.navigationBar.tintColor = .accentBlue
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "arrow.clockwise"),
             style: .plain, target: self, action: #selector(reload))
-
         setupWebView()
         setupProgressBar()
         startNetworkMonitor()
-        // ✅ Fix: Gọi ở viewDidLoad — chỉ sync cookie + load 1 lần duy nhất khi khởi tạo
         syncCookiesThenLoad()
     }
 
-    // ✅ Fix: Bỏ viewWillAppear — không reload vô nghĩa mỗi lần view xuất hiện lại
-
-    // ✅ Fix #2: Memory — deinit dọn sạch
     deinit {
         kvoToken?.invalidate()
         networkMonitor.cancel()
@@ -224,39 +775,26 @@ class WebViewController: UIViewController {
         webView?.stopLoading()
     }
 
-    func setupWebView() {
+    private func setupWebView() {
         let cfg = WKWebViewConfiguration()
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
-
-        // ✅ Lưu cookie & session
         cfg.websiteDataStore = WKWebsiteDataStore.default()
-
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         cfg.defaultWebpagePreferences = prefs
-
-        // ✅ Fix Bug #1: Camera — cho phép WebView xử lý media capture
-        // Cần thêm vào Info.plist:
-        //   NSCameraUsageDescription  → "Dùng camera để chụp tài liệu"
-        //   NSMicrophoneUsageDescription → "Dùng microphone cho AI voice"
-        cfg.mediaTypesRequiringUserActionForPlayback = []
-
         webView = WKWebView(frame: .zero, configuration: cfg)
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
-        webView.uiDelegate = self   // ✅ Fix Bug #1: uiDelegate xử lý camera permission popup
+        webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.decelerationRate = .normal
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
-
         webView.customUserAgent =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) " +
             "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
             "Version/16.6 Mobile/15E148 Safari/604.1"
-
         view.addSubview(webView)
-
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -265,8 +803,8 @@ class WebViewController: UIViewController {
         ])
     }
 
-    func setupProgressBar() {
-        progressBar.progressTintColor = .systemBlue
+    private func setupProgressBar() {
+        progressBar.progressTintColor = .accentBlue
         progressBar.trackTintColor = .clear
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(progressBar)
@@ -276,7 +814,6 @@ class WebViewController: UIViewController {
             progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 3),
         ])
-        // ✅ Fix #2: [weak self] tránh retain cycle
         kvoToken = webView.observe(\.estimatedProgress, options: .new) { [weak self] wv, _ in
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -287,60 +824,37 @@ class WebViewController: UIViewController {
         }
     }
 
-    // ✅ Fix #3: Network monitor
-    func startNetworkMonitor() {
+    private func startNetworkMonitor() {
         networkMonitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async { [weak self] in
                 self?.isNetworkAvailable = (path.status == .satisfied)
             }
         }
-        networkMonitor.start(queue: DispatchQueue(label: "NetworkMonitor"))
+        networkMonitor.start(queue: DispatchQueue(label: "bvk.network"))
     }
 
-    // ✅ Lấy cookie từ Safari (HTTPCookieStorage.shared) → inject vào WKWebView
-    // Nếu đã đăng nhập Google/Facebook trên Safari → vào app là đăng nhập luôn
     func syncCookiesThenLoad() {
-        let wkStore = WKWebsiteDataStore.default().httpCookieStore
-        let safariCookies = HTTPCookieStorage.shared.cookies ?? []
-        let group = DispatchGroup()
-
-        // Bước 1: Copy cookie Safari → WKWebView store
-        for cookie in safariCookies {
-            group.enter()
-            wkStore.setCookie(cookie) { group.leave() }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        let safari = HTTPCookieStorage.shared.cookies ?? []
+        let g = DispatchGroup()
+        for c in safari { g.enter(); store.setCookie(c) { g.leave() } }
+        g.enter()
+        store.getAllCookies { cookies in
+            for c in cookies { HTTPCookieStorage.shared.setCookie(c) }
+            g.leave()
         }
-
-        // Bước 2: Lấy cookie WKWebView hiện có → ghi ngược lại Safari để đồng bộ 2 chiều
-        group.enter()
-        wkStore.getAllCookies { existingCookies in
-            for cookie in existingCookies {
-                HTTPCookieStorage.shared.setCookie(cookie)
-            }
-            group.leave()
-        }
-
-        group.notify(queue: .main) { [weak self] in
-            self?.loadPage()
-        }
+        g.notify(queue: .main) { [weak self] in self?.loadPage() }
     }
 
-    // ✅ Khi trang load xong → ghi cookie ngược lại Safari để lần sau dùng tiếp (session persistence)
     func persistCookiesToSafari() {
         WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-            for cookie in cookies {
-                HTTPCookieStorage.shared.setCookie(cookie)
-            }
+            for c in cookies { HTTPCookieStorage.shared.setCookie(c) }
         }
     }
 
     func loadPage() {
-        // ✅ Fix #3: Check mạng trước khi load
-        guard isNetworkAvailable else {
-            showNoNetworkAlert()
-            return
-        }
+        guard isNetworkAvailable else { showNoNetworkAlert(); return }
         retryCount = 0
-        // ✅ Fix #3: Timeout giảm từ 25s → 15s
         var req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
         req.setValue(webView.customUserAgent, forHTTPHeaderField: "User-Agent")
         webView.load(req)
@@ -348,131 +862,79 @@ class WebViewController: UIViewController {
 
     @objc func reload() {
         guard isNetworkAvailable else { showNoNetworkAlert(); return }
-        retryCount = 0
-        webView.reload()
+        retryCount = 0; webView.reload()
     }
 
     func showNoNetworkAlert() {
-        let alert = UIAlertController(
-            title: "Không có mạng",
-            message: "Kiểm tra Wi-Fi hoặc 4G rồi thử lại.",
-            preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { [weak self] _ in
-            self?.loadPage()
-        })
-        alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
-        present(alert, animated: true)
+        let a = UIAlertController(title: "Không có mạng", message: "Kiểm tra Wi-Fi hoặc 4G rồi thử lại.", preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "Thử lại", style: .default) { [weak self] _ in self?.loadPage() })
+        a.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
+        present(a, animated: true)
     }
 }
 
-// MARK: WKNavigationDelegate
 extension WebViewController: WKNavigationDelegate {
-
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryCount = 0
-        progressBar.isHidden = true
-        progressBar.setProgress(0, animated: false)
-        if let t = webView.title, !t.isEmpty { self.title = t }
-        // ✅ Mỗi khi load xong → lưu cookie ngược lại Safari để đồng bộ session
+        progressBar.isHidden = true; progressBar.setProgress(0, animated: false)
+        if let t = webView.title, !t.isEmpty { title = t }
         persistCookiesToSafari()
     }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        handleError(error)
-    }
-
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleError(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
         guard (error as NSError).code != NSURLErrorCancelled else { return }
         handleError(error)
     }
-
     func handleError(_ error: Error) {
         progressBar.isHidden = true
-        // ✅ Fix #3: Nếu mất mạng → báo ngay, không retry vô nghĩa
-        if !isNetworkAvailable {
-            showNoNetworkAlert()
-            return
-        }
+        if !isNetworkAvailable { showNoNetworkAlert(); return }
         if retryCount < maxRetry {
             retryCount += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.webView.reload()
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.webView.reload() }
             return
         }
-        let alert = UIAlertController(title: "Không tải được",
-                                      message: "Kiểm tra mạng rồi thử lại.",
-                                      preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { [weak self] _ in
-            self?.loadPage()
-        })
-        alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
-        present(alert, animated: true)
+        let a = UIAlertController(title: "Không tải được", message: "Kiểm tra mạng rồi thử lại.", preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "Thử lại", style: .default) { [weak self] _ in self?.loadPage() })
+        a.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
+        present(a, animated: true)
     }
-
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = action.request.url,
-              ["https","http","about"].contains(url.scheme ?? "")
-        else { decisionHandler(.cancel); return }
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = action.request.url, ["https","http","about"].contains(url.scheme ?? "") else { decisionHandler(.cancel); return }
         decisionHandler(.allow)
     }
-
-    // ✅ Fix #5: WebContent process bị iOS kill (RAM quá tải) → tự reload
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        retryCount = 0
-        webView.reload()
-    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { retryCount = 0; webView.reload() }
 }
 
-// MARK: WKUIDelegate
 extension WebViewController: WKUIDelegate {
-
-    // ✅ Fix Bug #1: Xử lý camera permission khi web AI yêu cầu
     func webView(_ webView: WKWebView,
                  requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        // Hiện alert hỏi user thay vì tự grant/deny
-        let typeName: String
+        let name: String
         switch type {
-        case .camera:             typeName = "camera"
-        case .microphone:         typeName = "microphone"
-        case .cameraAndMicrophone: typeName = "camera và microphone"
-        @unknown default:         typeName = "thiết bị"
+        case .camera: name = "camera"
+        case .microphone: name = "microphone"
+        case .cameraAndMicrophone: name = "camera và microphone"
+        @unknown default: name = "thiết bị"
         }
-        let alert = UIAlertController(
-            title: "Yêu cầu quyền truy cập",
-            message: "\(origin.host) muốn dùng \(typeName) của bạn.",
-            preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cho phép", style: .default) { _ in
-            decisionHandler(.grant)
-        })
-        alert.addAction(UIAlertAction(title: "Từ chối", style: .cancel) { _ in
-            decisionHandler(.deny)
-        })
-        present(alert, animated: true)
+        let a = UIAlertController(title: "Yêu cầu quyền", message: "\(origin.host) muốn dùng \(name).", preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "Cho phép", style: .default) { _ in decisionHandler(.grant) })
+        a.addAction(UIAlertAction(title: "Từ chối", style: .cancel)  { _ in decisionHandler(.deny) })
+        present(a, animated: true)
     }
-
-    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
         present(a, animated: true)
     }
-
-    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "OK",  style: .default) { _ in completionHandler(true) })
         a.addAction(UIAlertAction(title: "Huỷ", style: .cancel)  { _ in completionHandler(false) })
         present(a, animated: true)
     }
-
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for navigationAction: WKNavigationAction,
-                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url { webView.load(URLRequest(url: url)) }
         return nil
     }
@@ -486,11 +948,17 @@ class AboutViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Tác giả"
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = UIColor(red:0.07,green:0.08,blue:0.10,alpha:1)
+        navigationController?.navigationBar.tintColor = .accentBlue
+        navigationController?.navigationBar.titleTextAttributes = [.foregroundColor: UIColor.white]
+        navigationController?.navigationBar.barStyle = .black
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .close, target: self, action: #selector(close))
         buildUI()
     }
 
-    func buildUI() {
+    @objc private func close() { dismiss(animated: true) }
+
+    private func buildUI() {
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
@@ -500,128 +968,142 @@ class AboutViewController: UIViewController {
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-
         let root = UIStackView()
-        root.axis = .vertical
-        root.alignment = .center
-        root.spacing = 20
+        root.axis = .vertical; root.alignment = .center; root.spacing = 16
         root.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(root)
         NSLayoutConstraint.activate([
-            root.topAnchor.constraint(equalTo: scroll.topAnchor, constant: 40),
+            root.topAnchor.constraint(equalTo: scroll.topAnchor, constant: 36),
             root.leadingAnchor.constraint(equalTo: scroll.leadingAnchor, constant: 20),
             root.trailingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: -20),
             root.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -40),
             root.widthAnchor.constraint(equalTo: scroll.widthAnchor, constant: -40),
         ])
 
-        let avatarWrap = UIView()
-        avatarWrap.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.1)
-        avatarWrap.layer.cornerRadius = 52
-        avatarWrap.widthAnchor.constraint(equalToConstant: 104).isActive = true
-        avatarWrap.heightAnchor.constraint(equalToConstant: 104).isActive = true
-        let icon = UIImageView(image: UIImage(systemName: "person.2.circle.fill"))
-        icon.tintColor = .systemBlue
-        icon.contentMode = .scaleAspectFit
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        avatarWrap.addSubview(icon)
+        // Avatar
+        let ring = UIView()
+        ring.layer.cornerRadius = 48
+        ring.layer.borderWidth  = 1.5
+        ring.layer.borderColor  = UIColor.accentBlue.withAlphaComponent(0.4).cgColor
+        ring.backgroundColor    = UIColor.accentBlue.withAlphaComponent(0.08)
+        ring.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        ring.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        let iconIV = UIImageView(image: UIImage(systemName: "person.2.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 58, weight: .regular)))
+        iconIV.tintColor = .accentBlue; iconIV.contentMode = .scaleAspectFit
+        iconIV.translatesAutoresizingMaskIntoConstraints = false
+        ring.addSubview(iconIV)
         NSLayoutConstraint.activate([
-            icon.centerXAnchor.constraint(equalTo: avatarWrap.centerXAnchor),
-            icon.centerYAnchor.constraint(equalTo: avatarWrap.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 72),
-            icon.heightAnchor.constraint(equalToConstant: 72),
+            iconIV.centerXAnchor.constraint(equalTo: ring.centerXAnchor),
+            iconIV.centerYAnchor.constraint(equalTo: ring.centerYAnchor),
+            iconIV.widthAnchor.constraint(equalToConstant: 64),
+            iconIV.heightAnchor.constraint(equalToConstant: 64),
         ])
 
-        let appName = lbl("CustomBVK", size: 28, weight: .bold)
-        let version = lbl("Phiên bản 1.0 · iOS 15+", size: 13, color: .secondaryLabel)
+        let appAttr = NSMutableAttributedString(
+            string: "Custom",
+            attributes: [.font: UIFont.systemFont(ofSize: 24, weight: .bold), .foregroundColor: UIColor.white])
+        appAttr.append(NSAttributedString(
+            string: "BVK",
+            attributes: [.font: UIFont.systemFont(ofSize: 24, weight: .bold), .foregroundColor: UIColor.accentBlue]))
+        let appLbl = UILabel(); appLbl.attributedText = appAttr
+        let verLbl = mkLbl("Phiên bản 1.0 · iOS 15+", size: 13, color: UIColor.white.withAlphaComponent(0.35))
 
-        let devCard = card()
-        let devStack = vstack(16)
-        devCard.addSubview(devStack)
-        pin(devStack, to: devCard)
-        devStack.addArrangedSubview(lbl("👨‍💻  Nhà phát triển", size: 12, weight: .semibold, color: .systemBlue))
-        devStack.addArrangedSubview(nameRow("Văn Khoa"))
-        devStack.addArrangedSubview(divider())
-        devStack.addArrangedSubview(nameRow("Cao Long"))
+        let devCard = glassCard()
+        let devStack = vstack(12); devCard.addSubview(devStack); pin(devStack, to: devCard)
+        devStack.addArrangedSubview(sectionHeader("Nhà phát triển", icon: "person.2.fill"))
+        devStack.addArrangedSubview(sep())
+        devStack.addArrangedSubview(devRow("Văn Khoa", role: "Developer"))
+        devStack.addArrangedSubview(sep())
+        devStack.addArrangedSubview(devRow("Cao Long", role: "Developer"))
 
-        let contactCard = card()
-        let contactStack = vstack(12)
-        contactCard.addSubview(contactStack)
-        pin(contactStack, to: contactCard)
-        contactStack.addArrangedSubview(lbl("📬  Liên hệ", size: 12, weight: .semibold, color: .systemBlue))
+        let contactCard = glassCard()
+        let contactStack = vstack(12); contactCard.addSubview(contactStack); pin(contactStack, to: contactCard)
+        contactStack.addArrangedSubview(sectionHeader("Liên hệ", icon: "envelope.fill"))
+        contactStack.addArrangedSubview(sep())
         let emailBtn = UIButton(type: .system)
         emailBtn.setTitle("tranvantrinhhd@gmail.com", for: .normal)
-        emailBtn.titleLabel?.font = .systemFont(ofSize: 15)
+        emailBtn.setTitleColor(.accentBlue, for: .normal)
+        emailBtn.titleLabel?.font = .systemFont(ofSize: 14)
         emailBtn.contentHorizontalAlignment = .left
         emailBtn.addTarget(self, action: #selector(mailTap), for: .touchUpInside)
         contactStack.addArrangedSubview(emailBtn)
 
-        let copy = lbl("© 2025 Văn Khoa & Cao Long\nAll rights reserved.", size: 12, color: .tertiaryLabel)
-        copy.numberOfLines = 0
-        copy.textAlignment = .center
+        let copyLbl = mkLbl("© 2025 Văn Khoa & Cao Long\nAll rights reserved.", size: 11, color: UIColor.white.withAlphaComponent(0.2))
+        copyLbl.numberOfLines = 0; copyLbl.textAlignment = .center
 
-        root.addArrangedSubview(avatarWrap)
-        root.addArrangedSubview(appName)
-        root.addArrangedSubview(version)
-        root.setCustomSpacing(28, after: version)
+        root.addArrangedSubview(ring)
+        root.addArrangedSubview(appLbl)
+        root.addArrangedSubview(verLbl)
+        root.setCustomSpacing(24, after: verLbl)
         root.addArrangedSubview(devCard)
         root.addArrangedSubview(contactCard)
-        root.setCustomSpacing(28, after: contactCard)
-        root.addArrangedSubview(copy)
+        root.setCustomSpacing(24, after: contactCard)
+        root.addArrangedSubview(copyLbl)
     }
 
-    func lbl(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = .label) -> UILabel {
-        let l = UILabel(); l.text = text
-        l.font = .systemFont(ofSize: size, weight: weight); l.textColor = color
-        return l
+    private func mkLbl(_ t: String, size: CGFloat, color: UIColor = .white) -> UILabel {
+        let l = UILabel(); l.text = t; l.font = .systemFont(ofSize: size); l.textColor = color; return l
     }
-
-    func nameRow(_ name: String) -> UIStackView {
-        let s = UIStackView(); s.axis = .horizontal; s.spacing = 10
-        let n = UILabel(); n.text = name
-        n.font = .systemFont(ofSize: 16, weight: .medium); n.textColor = .label
-        s.addArrangedSubview(n)
-        return s
+    private func sectionHeader(_ text: String, icon: String) -> UIView {
+        let row = UIStackView(); row.axis = .horizontal; row.spacing = 7; row.alignment = .center
+        let iv = UIImageView(image: UIImage(systemName: icon,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)))
+        iv.tintColor = .accentBlue; iv.contentMode = .scaleAspectFit
+        iv.widthAnchor.constraint(equalToConstant: 14).isActive = true
+        let l = mkLbl(text.uppercased(), size: 11, color: .accentBlue)
+        row.addArrangedSubview(iv); row.addArrangedSubview(l); return row
     }
-
-    func divider() -> UIView {
-        let v = UIView(); v.backgroundColor = .separator
-        v.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
-        return v
+    private func devRow(_ name: String, role: String) -> UIView {
+        let row = UIStackView(); row.axis = .horizontal; row.alignment = .center
+        let n = UILabel(); n.text = name; n.font = .systemFont(ofSize: 15, weight: .medium); n.textColor = .white
+        let r = mkLbl(role, size: 12, color: UIColor.white.withAlphaComponent(0.35))
+        row.addArrangedSubview(n); row.addArrangedSubview(UIView()); row.addArrangedSubview(r); return row
     }
-
-    func card() -> UIView {
+    private func sep() -> UIView {
+        let v = UIView(); v.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+        v.heightAnchor.constraint(equalToConstant: 0.5).isActive = true; return v
+    }
+    private func glassCard() -> UIView {
         let v = UIView()
-        v.backgroundColor = .secondarySystemGroupedBackground
-        v.layer.cornerRadius = 14
-        v.layer.shadowColor = UIColor.black.cgColor
-        v.layer.shadowOpacity = 0.05
-        v.layer.shadowRadius = 6
-        v.layer.shadowOffset = CGSize(width: 0, height: 2)
+        v.backgroundColor = UIColor.white.withAlphaComponent(0.07)
+        v.layer.cornerRadius = 16
+        v.layer.borderWidth  = 0.5
+        v.layer.borderColor  = UIColor.white.withAlphaComponent(0.10).cgColor
         v.translatesAutoresizingMaskIntoConstraints = false
         v.widthAnchor.constraint(equalToConstant: UIScreen.main.bounds.width - 40).isActive = true
         return v
     }
-
-    func vstack(_ spacing: CGFloat) -> UIStackView {
+    private func vstack(_ spacing: CGFloat) -> UIStackView {
         let s = UIStackView(); s.axis = .vertical; s.spacing = spacing
         s.translatesAutoresizingMaskIntoConstraints = false; return s
     }
-
-    func pin(_ child: UIView, to parent: UIView) {
+    private func pin(_ child: UIView, to parent: UIView) {
         NSLayoutConstraint.activate([
-            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: 18),
-            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 18),
-            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -18),
-            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -18),
+            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: 16),
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 16),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -16),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -16),
         ])
     }
-
-    @objc func mailTap() {
-        if let url = URL(string: "mailto:tranvantrinhhd@gmail.com") {
-            UIApplication.shared.open(url)
-        }
+    @objc private func mailTap() {
+        if let url = URL(string: "mailto:tranvantrinhhd@gmail.com") { UIApplication.shared.open(url) }
     }
 }
 
+// ─────────────────────────────────────────
 typealias ViewController = HomeViewController
+
+// ─────────────────────────────────────────
+// MARK: - Info.plist — PHẢI THÊM 3 KEY NÀY
+// ─────────────────────────────────────────
+/*
+ <key>NSCameraUsageDescription</key>
+ <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích</string>
+
+ <key>NSMicrophoneUsageDescription</key>
+ <string>Dùng microphone để nhập liệu giọng nói cho AI</string>
+
+ <key>NSPhotoLibraryUsageDescription</key>
+ <string>Chọn ảnh từ thư viện làm hình nền ứng dụng</string>
+ */
