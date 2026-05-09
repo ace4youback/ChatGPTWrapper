@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import Network   // ← Fix #3: check trạng thái mạng
 
 // ─────────────────────────────────────────
 // MARK: - Cấu hình AI Tools
@@ -46,12 +47,15 @@ class HomeViewController: UIViewController {
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         bgView.addSubview(overlay)
         view.insertSubview(bgView, at: 0)
-        DispatchQueue.global().async {
-            guard let url = URL(string: imageURL),
-                  let data = try? Data(contentsOf: url),
-                  let img  = UIImage(data: data) else { return }
+
+        // ✅ Fix: Dùng URLSession thay Data(contentsOf:)
+        // URLSession tự cache ảnh vào disk — lần sau mở app không tải lại
+        guard let url = URL(string: imageURL) else { return }
+        let req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            guard let data = data, let img = UIImage(data: data) else { return }
             DispatchQueue.main.async { bgView.image = img }
-        }
+        }.resume()
     }
 
     func setupURLBar() {
@@ -102,6 +106,8 @@ class HomeViewController: UIViewController {
         tableView.dataSource = self
         tableView.backgroundColor = .clear
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
+        // ✅ Fix UX: Cuộn table → bàn phím tự ẩn
+        tableView.keyboardDismissMode = .onDrag
         view.addSubview(tableView)
 
         NSLayoutConstraint.activate([
@@ -110,6 +116,15 @@ class HomeViewController: UIViewController {
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+
+        // ✅ Fix UX: Tap vào vùng trống ngoài bàn phím → ẩn bàn phím
+        let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tap.cancelsTouchesInView = false
+        view.addGestureRecognizer(tap)
+    }
+
+    @objc func dismissKeyboard() {
+        view.endEditing(true)
     }
 
     @objc func openURL() {
@@ -171,10 +186,13 @@ class WebViewController: UIViewController {
     private let url: URL
     private let pageTitle: String
 
+    // ✅ Fix #3: Network monitor để check mạng
+    private let networkMonitor = NWPathMonitor()
+    private var isNetworkAvailable = true
+
     init(url: URL, pageTitle: String) {
         self.url = url; self.pageTitle = pageTitle
         super.init(nibName: nil, bundle: nil)
-        // Full screen — ẩn tab bar khi vào web
         hidesBottomBarWhenPushed = true
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -190,7 +208,20 @@ class WebViewController: UIViewController {
 
         setupWebView()
         setupProgressBar()
-        loadPage()
+        startNetworkMonitor()
+        // ✅ Fix: Gọi ở viewDidLoad — chỉ sync cookie + load 1 lần duy nhất khi khởi tạo
+        syncCookiesThenLoad()
+    }
+
+    // ✅ Fix: Bỏ viewWillAppear — không reload vô nghĩa mỗi lần view xuất hiện lại
+
+    // ✅ Fix #2: Memory — deinit dọn sạch
+    deinit {
+        kvoToken?.invalidate()
+        networkMonitor.cancel()
+        webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
+        webView?.stopLoading()
     }
 
     func setupWebView() {
@@ -198,30 +229,27 @@ class WebViewController: UIViewController {
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
 
-        // ✅ Lưu cookie & session — không bị logout
+        // ✅ Lưu cookie & session
         cfg.websiteDataStore = WKWebsiteDataStore.default()
-
-        // ✅ Shared cookie với Safari (lấy tài khoản Google đã đăng nhập)
-        cfg.websiteDataStore.httpCookieStore.getAllCookies { cookies in
-            for cookie in cookies {
-                cfg.websiteDataStore.httpCookieStore.setCookie(cookie) { }
-            }
-        }
 
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         cfg.defaultWebpagePreferences = prefs
 
-        // Layout full màn hình — edge to edge
+        // ✅ Fix Bug #1: Camera — cho phép WebView xử lý media capture
+        // Cần thêm vào Info.plist:
+        //   NSCameraUsageDescription  → "Dùng camera để chụp tài liệu"
+        //   NSMicrophoneUsageDescription → "Dùng microphone cho AI voice"
+        cfg.mediaTypesRequiringUserActionForPlayback = []
+
         webView = WKWebView(frame: .zero, configuration: cfg)
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
-        webView.uiDelegate = self
+        webView.uiDelegate = self   // ✅ Fix Bug #1: uiDelegate xử lý camera permission popup
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.decelerationRate = .normal
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
 
-        // User agent Safari thật
         webView.customUserAgent =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) " +
             "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
@@ -229,7 +257,6 @@ class WebViewController: UIViewController {
 
         view.addSubview(webView)
 
-        // ✅ Full màn hình — edge to edge kể cả safe area
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -249,24 +276,72 @@ class WebViewController: UIViewController {
             progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 3),
         ])
+        // ✅ Fix #2: [weak self] tránh retain cycle
         kvoToken = webView.observe(\.estimatedProgress, options: .new) { [weak self] wv, _ in
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 let p = Float(wv.estimatedProgress)
-                self?.progressBar.setProgress(p, animated: true)
-                self?.progressBar.isHidden = p >= 1.0
+                self.progressBar.setProgress(p, animated: true)
+                self.progressBar.isHidden = p >= 1.0
+            }
+        }
+    }
+
+    // ✅ Fix #3: Network monitor
+    func startNetworkMonitor() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async { [weak self] in
+                self?.isNetworkAvailable = (path.status == .satisfied)
+            }
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "NetworkMonitor"))
+    }
+
+    // ✅ Fix #4: Sync cookie rồi mới load
+    func syncCookiesThenLoad() {
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        store.getAllCookies { [weak self] cookies in
+            let group = DispatchGroup()
+            for cookie in cookies {
+                group.enter()
+                store.setCookie(cookie) { group.leave() }
+            }
+            group.notify(queue: .main) { [weak self] in
+                self?.loadPage()
             }
         }
     }
 
     func loadPage() {
+        // ✅ Fix #3: Check mạng trước khi load
+        guard isNetworkAvailable else {
+            showNoNetworkAlert()
+            return
+        }
         retryCount = 0
-        var req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 25)
+        // ✅ Fix #3: Timeout giảm từ 25s → 15s
+        var req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
         req.setValue(webView.customUserAgent, forHTTPHeaderField: "User-Agent")
         webView.load(req)
     }
 
-    @objc func reload() { retryCount = 0; webView.reload() }
-    deinit { kvoToken?.invalidate() }
+    @objc func reload() {
+        guard isNetworkAvailable else { showNoNetworkAlert(); return }
+        retryCount = 0
+        webView.reload()
+    }
+
+    func showNoNetworkAlert() {
+        let alert = UIAlertController(
+            title: "Không có mạng",
+            message: "Kiểm tra Wi-Fi hoặc 4G rồi thử lại.",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { [weak self] _ in
+            self?.loadPage()
+        })
+        alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
+        present(alert, animated: true)
+    }
 }
 
 // MARK: WKNavigationDelegate
@@ -290,15 +365,24 @@ extension WebViewController: WKNavigationDelegate {
 
     func handleError(_ error: Error) {
         progressBar.isHidden = true
+        // ✅ Fix #3: Nếu mất mạng → báo ngay, không retry vô nghĩa
+        if !isNetworkAvailable {
+            showNoNetworkAlert()
+            return
+        }
         if retryCount < maxRetry {
             retryCount += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.webView.reload() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.webView.reload()
+            }
             return
         }
         let alert = UIAlertController(title: "Không tải được",
                                       message: "Kiểm tra mạng rồi thử lại.",
                                       preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { _ in self.loadPage() })
+        alert.addAction(UIAlertAction(title: "Thử lại", style: .default) { [weak self] _ in
+            self?.loadPage()
+        })
         alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
         present(alert, animated: true)
     }
@@ -310,10 +394,43 @@ extension WebViewController: WKNavigationDelegate {
         else { decisionHandler(.cancel); return }
         decisionHandler(.allow)
     }
+
+    // ✅ Fix #5: WebContent process bị iOS kill (RAM quá tải) → tự reload
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        retryCount = 0
+        webView.reload()
+    }
 }
 
 // MARK: WKUIDelegate
 extension WebViewController: WKUIDelegate {
+
+    // ✅ Fix Bug #1: Xử lý camera permission khi web AI yêu cầu
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // Hiện alert hỏi user thay vì tự grant/deny
+        let typeName: String
+        switch type {
+        case .camera:             typeName = "camera"
+        case .microphone:         typeName = "microphone"
+        case .cameraAndMicrophone: typeName = "camera và microphone"
+        @unknown default:         typeName = "thiết bị"
+        }
+        let alert = UIAlertController(
+            title: "Yêu cầu quyền truy cập",
+            message: "\(origin.host) muốn dùng \(typeName) của bạn.",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cho phép", style: .default) { _ in
+            decisionHandler(.grant)
+        })
+        alert.addAction(UIAlertAction(title: "Từ chối", style: .cancel) { _ in
+            decisionHandler(.deny)
+        })
+        present(alert, animated: true)
+    }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
@@ -485,3 +602,19 @@ class AboutViewController: UIViewController {
 }
 
 typealias ViewController = HomeViewController
+
+// ─────────────────────────────────────────
+// MARK: - Info.plist cần thêm (QUAN TRỌNG)
+// ─────────────────────────────────────────
+/*
+ Thêm các key sau vào Info.plist để camera & microphone hoạt động:
+
+ <key>NSCameraUsageDescription</key>
+ <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích</string>
+
+ <key>NSMicrophoneUsageDescription</key>
+ <string>Dùng microphone để nhập liệu giọng nói cho AI</string>
+
+ Nếu không có 2 key này, app sẽ crash ngay khi web AI
+ yêu cầu quyền truy cập camera (đây là lý do bug #1).
+ */
