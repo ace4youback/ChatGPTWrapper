@@ -148,13 +148,15 @@ final class AITableViewCell: UITableViewCell {
     private let nameLabel  = UILabel()
     private let urlLabel   = UILabel()
     private let badgeLabel = UILabel()
-    private let chevron    = UIImageView(image: UIImage(systemName: "chevron.right"))
+    private let chevron    = UIImageView(image: UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)))
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         backgroundColor = .clear
         selectionStyle  = .none
 
+        // iOS 15: phải set rõ background cho contentView, không để hệ thống override
+        contentView.backgroundColor = .clear
         cardView.backgroundColor = .cardBg
         cardView.layer.cornerRadius = 16
         cardView.layer.borderWidth  = 0.5
@@ -189,7 +191,7 @@ final class AITableViewCell: UITableViewCell {
 
         chevron.tintColor = UIColor.white.withAlphaComponent(0.18)
         chevron.contentMode = .scaleAspectFit
-        chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        // preferredSymbolConfiguration moved to image init for iOS 15 compat
         chevron.translatesAutoresizingMaskIntoConstraints = false
 
         let textStack = UIStackView(arrangedSubviews: [nameLabel, urlLabel])
@@ -336,12 +338,12 @@ final class WallpaperPickerViewController: UIViewController {
         view.addSubview(grid)
 
         // Dim slider row
-        let sunL = UIImageView(image: UIImage(systemName: "sun.min.fill"))
+        let sunL = UIImageView(image: UIImage(systemName: "sun.min.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13)))
         sunL.tintColor = UIColor.white.withAlphaComponent(0.35)
-        sunL.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 13)
-        let sunR = UIImageView(image: UIImage(systemName: "sun.max.fill"))
+        // sunL config inline
+        let sunR = UIImageView(image: UIImage(systemName: "sun.max.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17)))
         sunR.tintColor = UIColor.white.withAlphaComponent(0.75)
-        sunR.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 17)
+        // sunR config inline
         dimSlider.minimumValue = 0; dimSlider.maximumValue = 0.75; dimSlider.value = dimValue
         dimSlider.tintColor = .accentBlue
         dimSlider.addTarget(self, action: #selector(dimChanged), for: .valueChanged)
@@ -716,6 +718,10 @@ class HomeViewController: UIViewController {
         tableView.showsVerticalScrollIndicator = false
         tableView.keyboardDismissMode = .onDrag
         tableView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0)
+        // iOS 15: tắt section highlight mặc định
+        if #available(iOS 15.0, *) {
+            tableView.sectionHeaderTopPadding = 0
+        }
         tableView.delegate   = self
         tableView.dataSource = self
         tableView.register(AITableViewCell.self, forCellReuseIdentifier: "AICell")
@@ -818,11 +824,15 @@ class HomeViewController: UIViewController {
     @objc private func openWallpaper() {
         let vc = WallpaperPickerViewController()
         vc.delegate = self
-        vc.modalPresentationStyle = .pageSheet
-        if let sheet = vc.sheetPresentationController {
-            sheet.detents = [.medium()]
-            sheet.prefersGrabberVisible = false
-            sheet.preferredCornerRadius = 28
+        if #available(iOS 16.0, *) {
+            vc.modalPresentationStyle = .pageSheet
+            if let sheet = vc.sheetPresentationController {
+                sheet.detents = [.medium()]
+                sheet.prefersGrabberVisible = false
+                sheet.preferredCornerRadius = 28
+            }
+        } else {
+            vc.modalPresentationStyle = .formSheet
         }
         present(vc, animated: true)
     }
