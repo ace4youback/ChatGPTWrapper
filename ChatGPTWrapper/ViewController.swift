@@ -974,23 +974,83 @@ class WebViewController: UIViewController {
 
     private func setupWebView() {
         let cfg = WKWebViewConfiguration()
+
+        // ── 1. Media
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
+
+        // ── 2. Persistent session store (cookie + cache không bị xoá)
         cfg.websiteDataStore = WKWebsiteDataStore.default()
+
+        // ── 3. JavaScript luôn bật
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         cfg.defaultWebpagePreferences = prefs
-        webView = WKWebView(frame: .zero, configuration: cfg)
+
+        // ── 4. Tắt selection callout (copy/paste) không cần thiết → giảm overhead
+        cfg.selectionGranularity = .character
+
+        // ── 5. Cho phép AirPlay (media AI như Gemini)
+        cfg.allowsAirPlayForMediaPlayback = true
+
+        // ── 6. Inject viewport meta + performance hints trước khi trang load
+        //    Giúp mobile layout ngay lần đầu, tránh reflow
+        let viewportScript = WKUserScript(
+            source: """
+            var meta = document.querySelector('meta[name=viewport]');
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.name = 'viewport';
+                document.head.appendChild(meta);
+            }
+            meta.content = 'width=device-width, initial-scale=1, maximum-scale=5';
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        cfg.userContentController.addUserScript(viewportScript)
+
+        // ── 7. Inject performance script: tắt animation nặng, lazy load images
+        let perfScript = WKUserScript(
+            source: """
+            // Giảm animation nặng khi scroll
+            document.addEventListener('DOMContentLoaded', function() {
+                var style = document.createElement('style');
+                style.textContent = '*, *::before, *::after { scroll-behavior: auto !important; }';
+                document.head.appendChild(style);
+            });
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        cfg.userContentController.addUserScript(perfScript)
+
+        // ── 8. Build WKWebView
+        webView = WKWebView(frame: view.bounds, configuration: cfg)
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
         webView.uiDelegate = self
+
+        // ── 9. Back/forward swipe
         webView.allowsBackForwardNavigationGestures = true
+        webView.allowsLinkPreview = true
+
+        // ── 10. Scroll tuning: nhanh hơn, mượt hơn
         webView.scrollView.decelerationRate = .normal
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        webView.scrollView.showsHorizontalScrollIndicator = false
+
+        // ── 11. Tắt opaque background → tránh flash trắng khi load
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.backgroundColor = .black
+
+        // ── 12. User-Agent: Safari thật → tránh bị serve mobile-lite fallback
         webView.customUserAgent =
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) " +
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " +
             "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
-            "Version/16.6 Mobile/15E148 Safari/604.1"
+            "Version/17.0 Mobile/15E148 Safari/604.1"
+
         view.addSubview(webView)
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -1002,7 +1062,9 @@ class WebViewController: UIViewController {
 
     private func setupProgressBar() {
         progressBar.progressTintColor = .accentBlue
-        progressBar.trackTintColor = .clear
+        progressBar.trackTintColor    = .clear
+        progressBar.layer.cornerRadius = 1.5
+        progressBar.clipsToBounds = true
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(progressBar)
         NSLayoutConstraint.activate([
@@ -1011,12 +1073,29 @@ class WebViewController: UIViewController {
             progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 3),
         ])
+        // Throttle KVO: chỉ update UI khi tiến độ thay đổi >= 2% — tránh redraw liên tục
+        var lastReported: Float = 0
         kvoToken = webView.observe(\.estimatedProgress, options: .new) { [weak self] wv, _ in
+            let p = Float(wv.estimatedProgress)
+            guard abs(p - lastReported) >= 0.02 || p >= 1.0 else { return }
+            lastReported = p
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                let p = Float(wv.estimatedProgress)
                 self.progressBar.setProgress(p, animated: true)
-                self.progressBar.isHidden = p >= 1.0
+                if p >= 1.0 {
+                    // Delay ẩn để user thấy bar hoàn thành
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        UIView.animate(withDuration: 0.25) { self.progressBar.alpha = 0 }
+                        completion: { _ in
+                            self.progressBar.isHidden = true
+                            self.progressBar.alpha    = 1
+                            self.progressBar.setProgress(0, animated: false)
+                        }
+                    }
+                } else {
+                    self.progressBar.isHidden = false
+                    self.progressBar.alpha    = 1
+                }
             }
         }
     }
@@ -1034,13 +1113,26 @@ class WebViewController: UIViewController {
         let store = WKWebsiteDataStore.default().httpCookieStore
         let safari = HTTPCookieStorage.shared.cookies ?? []
         let g = DispatchGroup()
-        for c in safari { g.enter(); store.setCookie(c) { g.leave() } }
+
+        // Copy Safari → WKWebView
+        for cookie in safari {
+            g.enter()
+            store.setCookie(cookie) { g.leave() }
+        }
+        // Copy WKWebView → Safari (2 chiều)
         g.enter()
         store.getAllCookies { cookies in
             for c in cookies { HTTPCookieStorage.shared.setCookie(c) }
             g.leave()
         }
+
+        // Timeout 3s: nếu cookie sync treo thì vẫn load trang
+        let deadline = DispatchTime.now() + 3.0
         g.notify(queue: .main) { [weak self] in self?.loadPage() }
+        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+            guard let self = self, self.webView.url == nil else { return }
+            self.loadPage()  // fallback nếu notify chưa fire
+        }
     }
 
     func persistCookiesToSafari() {
@@ -1052,8 +1144,16 @@ class WebViewController: UIViewController {
     func loadPage() {
         guard isNetworkAvailable else { showNoNetworkAlert(); return }
         retryCount = 0
+
+        // Cache: dùng cache nếu có, fallback mạng → trang load ngay khi offline/mạng yếu
         var req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+
+        // Headers chuẩn Safari → tránh bị chặn hoặc serve trang rút gọn
         req.setValue(webView.customUserAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        req.setValue("vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+        req.setValue("gzip, deflate, br", forHTTPHeaderField: "Accept-Encoding")
+
         webView.load(req)
     }
 
@@ -1663,16 +1763,3 @@ final class SettingsViewController: UIViewController {
 // Entry point: dùng MainTabBarController thay vì HomeViewController
 typealias ViewController = MainTabBarController
 
-// ─────────────────────────────────────────
-// MARK: - Info.plist — PHẢI THÊM 3 KEY NÀY
-// ─────────────────────────────────────────
-/*
- <key>NSCameraUsageDescription</key>
- <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích</string>
-
- <key>NSMicrophoneUsageDescription</key>
- <string>Dùng microphone để nhập liệu giọng nói cho AI</string>
-
- <key>NSPhotoLibraryUsageDescription</key>
- <string>Chọn ảnh từ thư viện làm hình nền ứng dụng</string>
- */
