@@ -788,7 +788,7 @@ class HomeViewController: UIViewController {
                               iconName: "star.fill", iconColorHex: "#FFD700", iconBgHex: "#FFD70030", badge: nil)
             BookmarkStore.shared.add(bm)
             self?.tableView.reloadData()
-            self?.showToast("Đã lưu \u201c\(name)\u201d")
+            self?.showToast("Đã lưu \"\(name)\"")
         })
         present(alert, animated: true)
     }
@@ -874,7 +874,7 @@ extension HomeViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tv: UITableView, trailingSwipeActionsConfigurationForRowAt ip: IndexPath) -> UISwipeActionsConfiguration? {
         let bm = BookmarkStore.shared.all[ip.row]
         guard !bm.isBuiltIn else { return nil }
-        let del = UIContextualAction(style: .destructive, title: "Xoá") { [weak self] _, _, done in
+        let del = UIContextualAction(style: .destructive, title: "Xoá") { _, _, done in
             BookmarkStore.shared.remove(id: bm.id)
             tv.deleteRows(at: [ip], with: .fade)
             done(true)
@@ -1476,7 +1476,7 @@ final class CustomTabBar: UIView {
     }
 
     func select(index: Int, animated: Bool) {
-        let prev = selectedIndex
+        _ = selectedIndex
         selectedIndex = index
 
         // Update colors
