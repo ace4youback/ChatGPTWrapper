@@ -239,11 +239,20 @@ final class AITableViewCell: UITableViewCell {
         iconImage.tintColor = tool.iconColor
         iconWrap.backgroundColor = tool.iconBg
         if let badge = tool.badge {
-            badgeLabel.text = badge
-            badgeLabel.isHidden = false
-        } else {
-            badgeLabel.isHidden = true
-        }
+            badgeLabel.text = badge; badgeLabel.isHidden = false
+        } else { badgeLabel.isHidden = true }
+    }
+
+    // ✅ Configure từ Bookmark (dùng hex colors)
+    func configureBM(_ bm: Bookmark) {
+        nameLabel.text  = bm.name
+        urlLabel.text   = bm.url.replacingOccurrences(of: "https://", with: "")
+        iconImage.image = UIImage(systemName: bm.iconName)
+        iconImage.tintColor      = UIColor(hex: bm.iconColorHex)
+        iconWrap.backgroundColor = UIColor(hex: bm.iconBgHex)
+        if let badge = bm.badge {
+            badgeLabel.text = badge; badgeLabel.isHidden = false
+        } else { badgeLabel.isHidden = true }
     }
 
     override func setHighlighted(_ highlighted: Bool, animated: Bool) {
@@ -452,6 +461,67 @@ extension WallpaperPickerViewController: PHPickerViewControllerDelegate {
 }
 
 // ─────────────────────────────────────────
+// MARK: - BookmarkStore  (UserDefaults · Codable)
+// ─────────────────────────────────────────
+struct Bookmark: Codable, Equatable {
+    var id: String      = UUID().uuidString
+    var name: String
+    var url: String
+    var isBuiltIn: Bool
+    var iconName: String
+    var iconColorHex: String
+    var iconBgHex: String
+    var badge: String?
+}
+
+final class BookmarkStore {
+    static let shared = BookmarkStore()
+    private let udKey = "bvk_bookmarks_v2"
+
+    private let builtIns: [Bookmark] = [
+        Bookmark(name:"ChatGPT",    url:"https://chat.openai.com",       isBuiltIn:true,  iconName:"message.fill",       iconColorHex:"#10A37F", iconBgHex:"#10A37F30", badge:nil),
+        Bookmark(name:"Claude",     url:"https://claude.ai",             isBuiltIn:true,  iconName:"sparkles",           iconColorHex:"#CC8C5A", iconBgHex:"#CC8C5A30", badge:"HOT"),
+        Bookmark(name:"Gemini",     url:"https://gemini.google.com",     isBuiltIn:true,  iconName:"diamond.fill",       iconColorHex:"#4285F4", iconBgHex:"#4285F430", badge:nil),
+        Bookmark(name:"Copilot",    url:"https://copilot.microsoft.com", isBuiltIn:true,  iconName:"cpu.fill",           iconColorHex:"#0078D4", iconBgHex:"#0078D430", badge:nil),
+        Bookmark(name:"Grok",       url:"https://grok.com",              isBuiltIn:true,  iconName:"bolt.fill",          iconColorHex:"#DDDDDD", iconBgHex:"#FFFFFF1A", badge:nil),
+        Bookmark(name:"Perplexity", url:"https://perplexity.ai",         isBuiltIn:true,  iconName:"magnifyingglass",    iconColorHex:"#20B8BA", iconBgHex:"#20B8BA30", badge:nil),
+        Bookmark(name:"DeepSeek",   url:"https://chat.deepseek.com",     isBuiltIn:true,  iconName:"brain.head.profile", iconColorHex:"#7864FF", iconBgHex:"#7864FF30", badge:nil),
+    ]
+
+    private var custom: [Bookmark] {
+        get {
+            guard let d = UserDefaults.standard.data(forKey: udKey),
+                  let arr = try? JSONDecoder().decode([Bookmark].self, from: d) else { return [] }
+            return arr
+        }
+        set {
+            if let d = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(d, forKey: udKey)
+            }
+        }
+    }
+
+    var all: [Bookmark] { builtIns + custom }
+
+    func add(_ bm: Bookmark) { var c = custom; c.append(bm); custom = c }
+    func remove(id: String)  { custom = custom.filter { $0.id != id } }
+    func contains(url: String) -> Bool { all.contains { $0.url == url } }
+}
+
+// Hex → UIColor
+extension UIColor {
+    convenience init(hex: String) {
+        var h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        if h.count == 6 { h += "FF" }
+        let v = UInt64(h, radix: 16) ?? 0xFFFFFFFF
+        self.init(red:   CGFloat((v >> 24) & 0xFF) / 255,
+                  green: CGFloat((v >> 16) & 0xFF) / 255,
+                  blue:  CGFloat((v >>  8) & 0xFF) / 255,
+                  alpha: CGFloat( v        & 0xFF) / 255)
+    }
+}
+
+// ─────────────────────────────────────────
 // MARK: - HomeViewController
 // ─────────────────────────────────────────
 class HomeViewController: UIViewController {
@@ -582,10 +652,26 @@ class HomeViewController: UIViewController {
         goButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(goButton)
 
+        // ✅ Nút lưu bookmark bên cạnh nút Go
+        let saveBtn = UIButton(type: .system)
+        var saveCfg = UIButton.Configuration.filled()
+        saveCfg.image = UIImage(systemName: "bookmark.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+        saveCfg.baseBackgroundColor = UIColor.white.withAlphaComponent(0.10)
+        saveCfg.baseForegroundColor = UIColor.accentBlue
+        saveCfg.cornerStyle = .medium
+        saveBtn.configuration = saveCfg
+        saveBtn.layer.borderWidth = 0.5
+        saveBtn.layer.cornerRadius = 10
+        saveBtn.layer.borderColor = UIColor.accentBlue.withAlphaComponent(0.25).cgColor
+        saveBtn.addTarget(self, action: #selector(saveBookmark), for: .touchUpInside)
+        saveBtn.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(saveBtn)
+
         NSLayoutConstraint.activate([
             urlContainer.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12),
             urlContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            urlContainer.trailingAnchor.constraint(equalTo: goButton.leadingAnchor, constant: -8),
+            urlContainer.trailingAnchor.constraint(equalTo: saveBtn.leadingAnchor, constant: -7),
             urlContainer.heightAnchor.constraint(equalToConstant: 46),
 
             linkIcon.leadingAnchor.constraint(equalTo: urlContainer.leadingAnchor, constant: 12),
@@ -596,6 +682,11 @@ class HomeViewController: UIViewController {
             urlField.trailingAnchor.constraint(equalTo: urlContainer.trailingAnchor, constant: -8),
             urlField.topAnchor.constraint(equalTo: urlContainer.topAnchor),
             urlField.bottomAnchor.constraint(equalTo: urlContainer.bottomAnchor),
+
+            saveBtn.trailingAnchor.constraint(equalTo: goButton.leadingAnchor, constant: -7),
+            saveBtn.centerYAnchor.constraint(equalTo: urlContainer.centerYAnchor),
+            saveBtn.widthAnchor.constraint(equalToConstant: 40),
+            saveBtn.heightAnchor.constraint(equalToConstant: 40),
 
             goButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             goButton.centerYAnchor.constraint(equalTo: urlContainer.centerYAnchor),
@@ -672,6 +763,58 @@ class HomeViewController: UIViewController {
         pushWeb(url: url, title: url.host ?? raw)
     }
 
+    // ✅ Lưu bookmark từ URL bar
+    @objc func saveBookmark() {
+        guard var raw = urlField.text?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            let a = UIAlertController(title: nil, message: "Nhập link trước khi lưu.", preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "OK", style: .default)); present(a, animated: true); return
+        }
+        if !raw.hasPrefix("http") { raw = "https://" + raw }
+        guard URL(string: raw) != nil else { return }
+        if BookmarkStore.shared.contains(url: raw) {
+            let a = UIAlertController(title: "Đã lưu rồi", message: "Link này đã có trong danh sách.", preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "OK", style: .default)); present(a, animated: true); return
+        }
+        let alert = UIAlertController(title: "Lưu vào yêu thích", message: "Đặt tên cho link:", preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.placeholder = "Tên hiển thị"
+            tf.text = URL(string: raw)?.host ?? raw
+            tf.autocapitalizationType = .words
+        }
+        alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Lưu", style: .default) { [weak self] _ in
+            let name = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? (URL(string: raw)?.host ?? raw)
+            let bm = Bookmark(name: name, url: raw, isBuiltIn: false,
+                              iconName: "star.fill", iconColorHex: "#FFD700", iconBgHex: "#FFD70030", badge: nil)
+            BookmarkStore.shared.add(bm)
+            self?.tableView.reloadData()
+            self?.showToast("Đã lưu \u201c\(name)\u201d")
+        })
+        present(alert, animated: true)
+    }
+
+    private func showToast(_ msg: String) {
+        let t = UILabel()
+        t.text = "  \(msg)  "
+        t.font = .systemFont(ofSize: 13, weight: .medium)
+        t.textColor = .white; t.textAlignment = .center
+        t.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+        t.layer.cornerRadius = 14; t.layer.masksToBounds = true
+        t.layer.borderWidth = 0.5; t.layer.borderColor = UIColor.white.withAlphaComponent(0.14).cgColor
+        t.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(t)
+        NSLayoutConstraint.activate([
+            t.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            t.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
+            t.heightAnchor.constraint(equalToConstant: 38),
+        ])
+        t.alpha = 0
+        UIView.animate(withDuration: 0.2) { t.alpha = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            UIView.animate(withDuration: 0.3, animations: { t.alpha = 0 }) { _ in t.removeFromSuperview() }
+        }
+    }
+
     @objc private func openWallpaper() {
         let vc = WallpaperPickerViewController()
         vc.delegate = self
@@ -693,6 +836,7 @@ class HomeViewController: UIViewController {
 
     func pushWeb(url: URL, title: String) {
         let vc = WebViewController(url: url, pageTitle: title)
+        vc.onBookmarkToggle = { [weak self] in self?.tableView.reloadData() }
         navigationController?.pushViewController(vc, animated: true)
     }
 }
@@ -710,18 +854,33 @@ extension HomeViewController: WallpaperPickerDelegate {
     }
 }
 
-// MARK: TableView
+// MARK: TableView — dùng BookmarkStore
 extension HomeViewController: UITableViewDelegate, UITableViewDataSource {
-    func tableView(_ tv: UITableView, numberOfRowsInSection s: Int) -> Int { AITools.list.count }
+    func tableView(_ tv: UITableView, numberOfRowsInSection s: Int) -> Int {
+        BookmarkStore.shared.all.count
+    }
     func tableView(_ tv: UITableView, cellForRowAt ip: IndexPath) -> UITableViewCell {
         let cell = tv.dequeueReusableCell(withIdentifier: "AICell", for: ip) as! AITableViewCell
-        cell.configure(with: AITools.list[ip.row])
+        cell.configureBM(BookmarkStore.shared.all[ip.row])
         return cell
     }
     func tableView(_ tv: UITableView, didSelectRowAt ip: IndexPath) {
         tv.deselectRow(at: ip, animated: false)
-        let t = AITools.list[ip.row]
-        pushWeb(url: URL(string: t.url)!, title: t.name)
+        let bm = BookmarkStore.shared.all[ip.row]
+        guard let url = URL(string: bm.url) else { return }
+        pushWeb(url: url, title: bm.name)
+    }
+    // Swipe-to-delete — chỉ custom bookmark
+    func tableView(_ tv: UITableView, trailingSwipeActionsConfigurationForRowAt ip: IndexPath) -> UISwipeActionsConfiguration? {
+        let bm = BookmarkStore.shared.all[ip.row]
+        guard !bm.isBuiltIn else { return nil }
+        let del = UIContextualAction(style: .destructive, title: "Xoá") { [weak self] _, _, done in
+            BookmarkStore.shared.remove(id: bm.id)
+            tv.deleteRows(at: [ip], with: .fade)
+            done(true)
+        }
+        del.image = UIImage(systemName: "trash")
+        return UISwipeActionsConfiguration(actions: [del])
     }
 }
 
@@ -736,14 +895,26 @@ extension HomeViewController: UITextFieldDelegate {
 class WebViewController: UIViewController {
 
     private var webView: WKWebView!
-    private let progressBar  = UIProgressView(progressViewStyle: .bar)
+    private let progressBar     = UIProgressView(progressViewStyle: .bar)
     private var kvoToken: NSKeyValueObservation?
-    private var retryCount   = 0
-    private let maxRetry     = 2
+    private var retryCount      = 0
+    private let maxRetry        = 2
     private let url: URL
     private let pageTitle: String
-    private let networkMonitor   = NWPathMonitor()
+    private let networkMonitor  = NWPathMonitor()
     private var isNetworkAvailable = true
+
+    // ✅ Callback báo HomeVC reload table sau khi bookmark thay đổi
+    var onBookmarkToggle: (() -> Void)?
+
+    // Reader Mode state
+    private var isReaderMode    = false
+    private var originalHTML    = ""
+
+    // Nav bar buttons
+    private var bookmarkBarBtn: UIBarButtonItem!
+    private var readerBarBtn:   UIBarButtonItem!
+    private var reloadBarBtn:   UIBarButtonItem!
 
     init(url: URL, pageTitle: String) {
         self.url = url; self.pageTitle = pageTitle
@@ -758,9 +929,25 @@ class WebViewController: UIViewController {
         view.backgroundColor = .black
         navigationController?.setNavigationBarHidden(false, animated: false)
         navigationController?.navigationBar.tintColor = .accentBlue
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
+
+        // ── Nav bar buttons (right side: reload | reader | bookmark)
+        reloadBarBtn = UIBarButtonItem(
             image: UIImage(systemName: "arrow.clockwise"),
             style: .plain, target: self, action: #selector(reload))
+
+        readerBarBtn = UIBarButtonItem(
+            image: UIImage(systemName: "doc.plaintext"),
+            style: .plain, target: self, action: #selector(toggleReaderMode))
+        readerBarBtn.tintColor = UIColor.white.withAlphaComponent(0.4)   // dim until page loaded
+
+        let isBookmarked = BookmarkStore.shared.contains(url: url.absoluteString)
+        bookmarkBarBtn = UIBarButtonItem(
+            image: UIImage(systemName: isBookmarked ? "bookmark.fill" : "bookmark"),
+            style: .plain, target: self, action: #selector(toggleBookmark))
+        bookmarkBarBtn.tintColor = isBookmarked ? .accentBlue : UIColor.white.withAlphaComponent(0.6)
+
+        navigationItem.rightBarButtonItems = [reloadBarBtn, readerBarBtn, bookmarkBarBtn]
+
         setupWebView()
         setupProgressBar()
         startNetworkMonitor()
@@ -862,6 +1049,7 @@ class WebViewController: UIViewController {
 
     @objc func reload() {
         guard isNetworkAvailable else { showNoNetworkAlert(); return }
+        isReaderMode = false
         retryCount = 0; webView.reload()
     }
 
@@ -871,6 +1059,88 @@ class WebViewController: UIViewController {
         a.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
         present(a, animated: true)
     }
+
+    // ✅ Toggle Bookmark
+    @objc private func toggleBookmark() {
+        let urlStr = url.absoluteString
+        if BookmarkStore.shared.contains(url: urlStr) {
+            // Xoá — chỉ xoá custom, không xoá built-in
+            let all = BookmarkStore.shared.all
+            if let bm = all.first(where: { $0.url == urlStr }), !bm.isBuiltIn {
+                BookmarkStore.shared.remove(id: bm.id)
+                bookmarkBarBtn.image = UIImage(systemName: "bookmark")
+                bookmarkBarBtn.tintColor = UIColor.white.withAlphaComponent(0.6)
+                onBookmarkToggle?()
+            }
+        } else {
+            // Thêm mới
+            let name = webView.title?.trimmingCharacters(in: .whitespaces).nonEmpty ?? (url.host ?? urlStr)
+            let bm = Bookmark(name: name, url: urlStr, isBuiltIn: false,
+                              iconName: "star.fill", iconColorHex: "#FFD700", iconBgHex: "#FFD70030", badge: nil)
+            BookmarkStore.shared.add(bm)
+            bookmarkBarBtn.image = UIImage(systemName: "bookmark.fill")
+            bookmarkBarBtn.tintColor = .accentBlue
+            onBookmarkToggle?()
+            // Haptic
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+
+    // ✅ Reader Mode — inject CSS + strip nav/ads/sidebar
+    @objc private func toggleReaderMode() {
+        if isReaderMode {
+            // Thoát reader: reload trang gốc
+            isReaderMode = false
+            readerBarBtn.tintColor = UIColor.white.withAlphaComponent(0.55)
+            webView.reload()
+        } else {
+            // Vào reader: inject JS lấy nội dung chính + CSS thuần
+            let js = """
+            (function() {
+                var article = document.querySelector('article') ||
+                              document.querySelector('[role="main"]') ||
+                              document.querySelector('.article-body') ||
+                              document.querySelector('.post-content') ||
+                              document.querySelector('.entry-content') ||
+                              document.querySelector('main') ||
+                              document.body;
+                var content = article ? article.innerHTML : document.body.innerHTML;
+                var title   = document.title || '';
+                var html = `<!DOCTYPE html><html><head><meta charset='UTF-8'>
+                <meta name='viewport' content='width=device-width,initial-scale=1'>
+                <style>
+                  *{box-sizing:border-box;margin:0;padding:0}
+                  body{background:#0f1117;color:#e8e8e8;font-family:-apple-system,sans-serif;
+                       font-size:17px;line-height:1.75;padding:20px 18px 60px;max-width:700px;margin:0 auto}
+                  h1,h2,h3{color:#fff;margin:1.2em 0 0.5em;line-height:1.3}
+                  h1{font-size:1.6em}h2{font-size:1.3em}h3{font-size:1.1em}
+                  p{margin:0.8em 0}
+                  a{color:#78b4ff;text-decoration:none}
+                  img{max-width:100%;border-radius:10px;margin:12px 0}
+                  pre,code{background:#1e2230;padding:2px 6px;border-radius:5px;font-size:14px}
+                  blockquote{border-left:3px solid #78b4ff;padding-left:14px;color:#aaa;margin:12px 0}
+                  .reader-title{font-size:1.7em;font-weight:700;color:#fff;margin-bottom:18px;line-height:1.3}
+                  nav,header,footer,aside,.sidebar,.ads,.advertisement,[class*="banner"],[class*="popup"]{display:none!important}
+                </style></head><body>
+                <div class='reader-title'>${title}</div>
+                ${content}
+                </body></html>`;
+                return html;
+            })()
+            """
+            webView.evaluateJavaScript(js) { [weak self] result, _ in
+                guard let self = self, let html = result as? String else { return }
+                self.isReaderMode = true
+                self.readerBarBtn.tintColor = UIColor.accentBlue
+                self.webView.loadHTMLString(html, baseURL: self.url)
+            }
+        }
+    }
+}
+
+// String helper
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 extension WebViewController: WKNavigationDelegate {
@@ -879,6 +1149,8 @@ extension WebViewController: WKNavigationDelegate {
         progressBar.isHidden = true; progressBar.setProgress(0, animated: false)
         if let t = webView.title, !t.isEmpty { title = t }
         persistCookiesToSafari()
+        // Enable reader button sau khi trang load xong
+        readerBarBtn.tintColor = UIColor.white.withAlphaComponent(0.75)
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleError(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
@@ -1092,7 +1364,294 @@ class AboutViewController: UIViewController {
 }
 
 // ─────────────────────────────────────────
-typealias ViewController = HomeViewController
+// MARK: - CustomTabBar  (dark glass pill style)
+// ─────────────────────────────────────────
+final class CustomTabBar: UIView {
+
+    struct Item {
+        let icon: String        // SF Symbol
+        let label: String
+    }
+
+    private let items: [Item] = [
+        Item(icon: "house.fill",   label: "Trang chủ"),
+        Item(icon: "clock.fill",   label: "Lịch sử"),
+        Item(icon: "gearshape.fill", label: "Cài đặt"),
+        Item(icon: "info.circle.fill", label: "Tác giả"),
+    ]
+
+    var onSelect: ((Int) -> Void)?
+    private(set) var selectedIndex: Int = 0
+    private var buttons: [UIButton] = []
+    private let pillView = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupUI()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupUI() {
+        // Glass background
+        backgroundColor = UIColor.white.withAlphaComponent(0.07)
+        layer.cornerRadius  = 26
+        layer.borderWidth   = 0.5
+        layer.borderColor   = UIColor.white.withAlphaComponent(0.12).cgColor
+
+        // Blur underneath
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+        blur.frame = bounds
+        blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        blur.layer.cornerRadius = 26
+        blur.clipsToBounds = true
+        insertSubview(blur, at: 0)
+
+        // Active pill
+        pillView.backgroundColor = UIColor.white.withAlphaComponent(0.13)
+        pillView.layer.cornerRadius = 20
+        addSubview(pillView)
+
+        // Buttons
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.distribution = .fillEqually
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+
+        for (i, item) in items.enumerated() {
+            let btn = UIButton(type: .custom)
+            btn.tag = i
+            btn.addTarget(self, action: #selector(tabTapped(_:)), for: .touchUpInside)
+
+            // Icon
+            let iconIV = UIImageView()
+            iconIV.image = UIImage(systemName: item.icon,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))
+            iconIV.contentMode = .scaleAspectFit
+            iconIV.tintColor = (i == 0) ? .white : UIColor.white.withAlphaComponent(0.30)
+            iconIV.translatesAutoresizingMaskIntoConstraints = false
+            iconIV.tag = 100   // find later by tag
+
+            // Label
+            let lbl = UILabel()
+            lbl.text = item.label
+            lbl.font = .systemFont(ofSize: 10, weight: .medium)
+            lbl.textColor = (i == 0) ? .white : UIColor.white.withAlphaComponent(0.30)
+            lbl.textAlignment = .center
+            lbl.translatesAutoresizingMaskIntoConstraints = false
+            lbl.tag = 200
+
+            let col = UIStackView(arrangedSubviews: [iconIV, lbl])
+            col.axis = .vertical; col.spacing = 3; col.alignment = .center
+            col.isUserInteractionEnabled = false
+            col.translatesAutoresizingMaskIntoConstraints = false
+            btn.addSubview(col)
+            NSLayoutConstraint.activate([
+                col.centerXAnchor.constraint(equalTo: btn.centerXAnchor),
+                col.centerYAnchor.constraint(equalTo: btn.centerYAnchor),
+                iconIV.heightAnchor.constraint(equalToConstant: 22),
+            ])
+
+            buttons.append(btn)
+            stack.addArrangedSubview(btn)
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        movePill(to: selectedIndex, animated: false)
+    }
+
+    @objc private func tabTapped(_ sender: UIButton) {
+        let i = sender.tag
+        guard i != selectedIndex else { return }
+        select(index: i, animated: true)
+        onSelect?(i)
+    }
+
+    func select(index: Int, animated: Bool) {
+        let prev = selectedIndex
+        selectedIndex = index
+
+        // Update colors
+        for (i, btn) in buttons.enumerated() {
+            let active = (i == index)
+            let col = UIColor.white.withAlphaComponent(active ? 1.0 : 0.30)
+            if let stack = btn.subviews.compactMap({ $0 as? UIStackView }).first {
+                for sub in stack.arrangedSubviews {
+                    if let iv = sub as? UIImageView { iv.tintColor = col }
+                    if let l  = sub as? UILabel     { l.textColor  = col }
+                }
+            }
+        }
+
+        movePill(to: index, animated: animated)
+
+        // Bounce icon
+        if animated, let btn = buttons[safe: index] {
+            if let stack = btn.subviews.compactMap({ $0 as? UIStackView }).first,
+               let iv = stack.arrangedSubviews.first as? UIImageView {
+                UIView.animate(withDuration: 0.12, animations: {
+                    iv.transform = CGAffineTransform(scaleX: 1.25, y: 1.25)
+                }) { _ in
+                    UIView.animate(withDuration: 0.15) { iv.transform = .identity }
+                }
+            }
+        }
+    }
+
+    private func movePill(to index: Int, animated: Bool) {
+        guard !buttons.isEmpty else { return }
+        let btnW = bounds.width / CGFloat(buttons.count)
+        let pillW = btnW - 12
+        let pillH: CGFloat = 52
+        let x = btnW * CGFloat(index) + 6
+        let y = (bounds.height - pillH) / 2
+        let target = CGRect(x: x, y: y, width: pillW, height: pillH)
+        if animated {
+            UIView.animate(withDuration: 0.30,
+                           delay: 0,
+                           usingSpringWithDamping: 0.72,
+                           initialSpringVelocity: 0.5) {
+                self.pillView.frame = target
+            }
+        } else {
+            pillView.frame = target
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+// ─────────────────────────────────────────
+// MARK: - MainTabBarController
+// ─────────────────────────────────────────
+final class MainTabBarController: UIViewController {
+
+    private let tabBar    = CustomTabBar()
+    private let container = UIView()
+    private var vcs: [UIViewController] = []
+    private var current: UIViewController?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+
+        // Child VCs for each tab
+        let homeNav    = UINavigationController(rootViewController: HomeViewController())
+        let historyVC  = HistoryViewController()
+        let settingsVC = SettingsViewController()
+        let aboutNav   = UINavigationController(rootViewController: AboutViewController())
+        vcs = [homeNav, historyVC, settingsVC, aboutNav]
+
+        // Container
+        container.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(container)
+
+        // Tab bar
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(tabBar)
+
+        NSLayoutConstraint.activate([
+            // Tab bar: float above bottom, 14pt margin each side
+            tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
+            tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
+            tabBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
+            tabBar.heightAnchor.constraint(equalToConstant: 64),
+
+            // Container fills everything above tab bar
+            container.topAnchor.constraint(equalTo: view.topAnchor),
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: tabBar.topAnchor, constant: -8),
+        ])
+
+        tabBar.onSelect = { [weak self] index in
+            self?.switchTo(index: index)
+        }
+
+        switchTo(index: 0)
+    }
+
+    private func switchTo(index: Int) {
+        guard let newVC = vcs[safe: index] else { return }
+
+        // Remove current
+        if let cur = current {
+            cur.willMove(toParent: nil)
+            cur.view.removeFromSuperview()
+            cur.removeFromParent()
+        }
+
+        // Add new
+        addChild(newVC)
+        newVC.view.frame = container.bounds
+        newVC.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(newVC.view)
+        newVC.didMove(toParent: self)
+        current = newVC
+
+        // Sync tab bar
+        tabBar.select(index: index, animated: true)
+    }
+
+    // Expose for AboutViewController to push
+    func pushAbout() { switchTo(index: 3) }
+}
+
+// ─────────────────────────────────────────
+// MARK: - HistoryViewController  (stub)
+// ─────────────────────────────────────────
+final class HistoryViewController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor(red:0.07,green:0.08,blue:0.10,alpha:1)
+        let lbl = UILabel()
+        lbl.text = "Lịch sử truy cập"
+        lbl.font = .systemFont(ofSize: 18, weight: .semibold)
+        lbl.textColor = UIColor.white.withAlphaComponent(0.4)
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(lbl)
+        NSLayoutConstraint.activate([
+            lbl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            lbl.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+    }
+}
+
+// ─────────────────────────────────────────
+// MARK: - SettingsViewController  (stub)
+// ─────────────────────────────────────────
+final class SettingsViewController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor(red:0.07,green:0.08,blue:0.10,alpha:1)
+        let lbl = UILabel()
+        lbl.text = "Cài đặt"
+        lbl.font = .systemFont(ofSize: 18, weight: .semibold)
+        lbl.textColor = UIColor.white.withAlphaComponent(0.4)
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(lbl)
+        NSLayoutConstraint.activate([
+            lbl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            lbl.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+    }
+}
+
+// ─────────────────────────────────────────
+// Entry point: dùng MainTabBarController thay vì HomeViewController
+typealias ViewController = MainTabBarController
 
 // ─────────────────────────────────────────
 // MARK: - Info.plist — PHẢI THÊM 3 KEY NÀY
