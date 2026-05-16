@@ -985,6 +985,7 @@ class WebViewController: UIViewController {
 
         setupWebView()
         setupProgressBar()
+        setupAudioSession()
         startNetworkMonitor()
         syncCookiesThenLoad()
     }
@@ -995,6 +996,56 @@ class WebViewController: UIViewController {
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
         webView?.stopLoading()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // ✅ FIX AUDIO: AVAudioSession cho phép phát nhạc nền khi bấm Home
+    private func setupAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            // .playback = tiếp tục phát dù khoá màn hình / bấm Home
+            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetooth])
+            try session.setActive(true)
+        } catch {
+            print("AVAudioSession error:", error)
+        }
+
+        // Theo dõi khi app vào background → inject JS giữ video không dừng
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil)
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil)
+    }
+
+    // Khi bấm Home: inject JS để video không dừng + tự vào PiP
+    @objc private func appDidEnterBackground() {
+        let js = """
+        (function(){
+            var vid = document.querySelector('video');
+            if(!vid || vid.paused) return;
+            // Thử PiP trước
+            if(typeof vid.requestPictureInPicture === 'function' && document.pictureInPictureEnabled){
+                vid.requestPictureInPicture().catch(function(){});
+            }
+        })();
+        """
+        webView?.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    // Khi quay lại app: thoát PiP nếu đang PiP
+    @objc private func appWillEnterForeground() {
+        let js = """
+        (function(){
+            if(document.pictureInPictureElement){
+                document.exitPictureInPicture().catch(function(){});
+            }
+        })();
+        """
+        webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 
     // YouTube UA — dùng khi vào youtube.com để được serve đầy đủ tính năng
@@ -1069,17 +1120,42 @@ class WebViewController: UIViewController {
             })();
         """, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
 
-        // ── Picture-in-Picture: khi YouTube fullscreen → bật PiP tự động
+        // ── PiP + Audio keepAlive khi bấm Home
         uc.addUserScript(WKUserScript(source: """
             (function(){
+                // 1. Khi thoát fullscreen → vào PiP
                 document.addEventListener('fullscreenchange',function(){
                     var vid=document.querySelector('video');
-                    if(!document.fullscreenElement && vid){
+                    if(!document.fullscreenElement && vid && !vid.paused){
                         if(vid.readyState>=2 && typeof vid.requestPictureInPicture==='function'){
                             vid.requestPictureInPicture().catch(function(){});
                         }
                     }
                 });
+
+                // 2. Khi visibilitychange (app về background) → giữ video chạy
+                document.addEventListener('visibilitychange',function(){
+                    if(document.hidden){
+                        var vid=document.querySelector('video');
+                        if(vid && !vid.paused){
+                            // Giữ playback rate để iOS không dừng
+                            vid.playbackRate=vid.playbackRate;
+                            // Thử PiP
+                            if(typeof vid.requestPictureInPicture==='function'){
+                                vid.requestPictureInPicture().catch(function(){});
+                            }
+                        }
+                    }
+                });
+
+                // 3. Override pause event: nếu iOS cố dừng → resume ngay
+                function keepAlive(){
+                    var vid=document.querySelector('video');
+                    if(vid && vid.paused && document.hidden && !vid.ended){
+                        vid.play().catch(function(){});
+                    }
+                }
+                setInterval(keepAlive, 1000);
             })();
         """, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
 
@@ -1821,6 +1897,9 @@ final class MainTabBarController: UIViewController {
         let aboutNav   = UINavigationController(rootViewController: AboutViewController())
         vcs = [homeNav, historyVC, settingsVC, aboutNav]
 
+        // ✅ Home screen quick actions (3D Touch / long press icon)
+        setupQuickActions()
+
         // Container
         container.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(container)
@@ -1874,6 +1953,37 @@ final class MainTabBarController: UIViewController {
 
     // Expose for AboutViewController to push
     func pushAbout() { switchTo(index: 3) }
+
+    // ✅ Quick Actions: giữ icon app → chọn mở thẳng YouTube, ChatGPT, Claude...
+    private func setupQuickActions() {
+        let shortcuts: [(title: String, subtitle: String, icon: String, url: String)] = [
+            ("YouTube",    "Xem video",     "play.rectangle.fill", "https://m.youtube.com"),
+            ("ChatGPT",    "Trò chuyện AI", "message.fill",        "https://chat.openai.com"),
+            ("Claude",     "Trò chuyện AI", "sparkles",            "https://claude.ai"),
+            ("Gemini",     "Trò chuyện AI", "diamond.fill",        "https://gemini.google.com"),
+        ]
+        UIApplication.shared.shortcutItems = shortcuts.map { s in
+            UIApplicationShortcutItem(
+                type: "open_url_\(s.url)",
+                localizedTitle: s.title,
+                localizedSubtitle: s.subtitle,
+                icon: UIApplicationShortcutIcon(systemImageName: s.icon),
+                userInfo: ["url": s.url as NSSecureCoding]
+            )
+        }
+    }
+
+    // Gọi từ AppDelegate khi user chọn quick action
+    func handleQuickAction(url: String) {
+        guard let u = URL(string: url) else { return }
+        switchTo(index: 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if let nav = self.vcs.first as? UINavigationController,
+               let home = nav.viewControllers.first as? HomeViewController {
+                home.pushWeb(url: u, title: u.host ?? url)
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────
@@ -1915,6 +2025,22 @@ final class SettingsViewController: UIViewController {
         ])
     }
 }
+
+// ─────────────────────────────────────────
+// MARK: - Quick Action Handler (gọi từ AppDelegate/SceneDelegate)
+// ─────────────────────────────────────────
+// Trong AppDelegate.swift thêm:
+//
+// func application(_ application: UIApplication,
+//                  performActionFor shortcutItem: UIApplicationShortcutItem,
+//                  completionHandler: @escaping (Bool) -> Void) {
+//     if let urlStr = shortcutItem.userInfo?["url"] as? String,
+//        let window = UIApplication.shared.windows.first,
+//        let root   = window.rootViewController as? MainTabBarController {
+//         root.handleQuickAction(url: urlStr)
+//     }
+//     completionHandler(true)
+// }
 
 // ─────────────────────────────────────────
 // Entry point: dùng MainTabBarController thay vì HomeViewController
