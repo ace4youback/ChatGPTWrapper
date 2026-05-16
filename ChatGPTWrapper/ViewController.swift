@@ -2,6 +2,7 @@ import UIKit
 import WebKit
 import Network
 import PhotosUI
+import AVKit
 
 // ─────────────────────────────────────────
 // MARK: - Design Tokens
@@ -481,8 +482,14 @@ final class BookmarkStore {
     private let udKey = "bvk_bookmarks_v2"
 
     private let builtIns: [Bookmark] = [
+        // ── YouTube & Entertainment (ưu tiên đầu)
+        Bookmark(name:"YouTube",    url:"https://m.youtube.com",         isBuiltIn:true,  iconName:"play.rectangle.fill",iconColorHex:"#FF0000", iconBgHex:"#FF000030", badge:"HOT"),
+        Bookmark(name:"YouTube Music",url:"https://music.youtube.com",   isBuiltIn:true,  iconName:"music.note",         iconColorHex:"#FF0000", iconBgHex:"#FF000022", badge:nil),
+        Bookmark(name:"Netflix",    url:"https://www.netflix.com",       isBuiltIn:true,  iconName:"tv.fill",            iconColorHex:"#E50914", iconBgHex:"#E5091422", badge:nil),
+        Bookmark(name:"TikTok",     url:"https://www.tiktok.com",        isBuiltIn:true,  iconName:"video.fill",         iconColorHex:"#69C9D0", iconBgHex:"#69C9D022", badge:nil),
+        // ── AI Tools
         Bookmark(name:"ChatGPT",    url:"https://chat.openai.com",       isBuiltIn:true,  iconName:"message.fill",       iconColorHex:"#10A37F", iconBgHex:"#10A37F30", badge:nil),
-        Bookmark(name:"Claude",     url:"https://claude.ai",             isBuiltIn:true,  iconName:"sparkles",           iconColorHex:"#CC8C5A", iconBgHex:"#CC8C5A30", badge:"HOT"),
+        Bookmark(name:"Claude",     url:"https://claude.ai",             isBuiltIn:true,  iconName:"sparkles",           iconColorHex:"#CC8C5A", iconBgHex:"#CC8C5A30", badge:nil),
         Bookmark(name:"Gemini",     url:"https://gemini.google.com",     isBuiltIn:true,  iconName:"diamond.fill",       iconColorHex:"#4285F4", iconBgHex:"#4285F430", badge:nil),
         Bookmark(name:"Copilot",    url:"https://copilot.microsoft.com", isBuiltIn:true,  iconName:"cpu.fill",           iconColorHex:"#0078D4", iconBgHex:"#0078D430", badge:nil),
         Bookmark(name:"Grok",       url:"https://grok.com",              isBuiltIn:true,  iconName:"bolt.fill",          iconColorHex:"#DDDDDD", iconBgHex:"#FFFFFF1A", badge:nil),
@@ -731,7 +738,7 @@ class HomeViewController: UIViewController {
         // Section header
         let headerH = UIView(frame: CGRect(x:0,y:0,width:UIScreen.main.bounds.width,height:38))
         let secLbl = UILabel()
-        secLbl.text = "CHỌN LINK"
+        secLbl.text = "YOUTUBE & AI"
         secLbl.font = .systemFont(ofSize: 11, weight: .semibold)
         secLbl.textColor = UIColor.white.withAlphaComponent(0.32)
         let kern: CGFloat = 1.0
@@ -922,9 +929,15 @@ class WebViewController: UIViewController {
     private var originalHTML    = ""
 
     // Nav bar buttons
-    private var bookmarkBarBtn: UIBarButtonItem!
-    private var readerBarBtn:   UIBarButtonItem!
-    private var reloadBarBtn:   UIBarButtonItem!
+    private var bookmarkBarBtn:    UIBarButtonItem!
+    private var readerBarBtn:      UIBarButtonItem!
+    private var reloadBarBtn:      UIBarButtonItem!
+    private var pipBarBtn:         UIBarButtonItem!
+    private var fullscreenBarBtn:  UIBarButtonItem!
+
+    // Fullscreen state
+    private var isFullscreen = false
+    private var savedNavBarHidden = false
 
     init(url: URL, pageTitle: String) {
         self.url = url; self.pageTitle = pageTitle
@@ -948,7 +961,7 @@ class WebViewController: UIViewController {
         readerBarBtn = UIBarButtonItem(
             image: UIImage(systemName: "doc.plaintext"),
             style: .plain, target: self, action: #selector(toggleReaderMode))
-        readerBarBtn.tintColor = UIColor.white.withAlphaComponent(0.4)   // dim until page loaded
+        readerBarBtn.tintColor = UIColor.white.withAlphaComponent(0.4)
 
         let isBookmarked = BookmarkStore.shared.contains(url: url.absoluteString)
         bookmarkBarBtn = UIBarButtonItem(
@@ -956,7 +969,19 @@ class WebViewController: UIViewController {
             style: .plain, target: self, action: #selector(toggleBookmark))
         bookmarkBarBtn.tintColor = isBookmarked ? .accentBlue : UIColor.white.withAlphaComponent(0.6)
 
-        navigationItem.rightBarButtonItems = [reloadBarBtn, readerBarBtn, bookmarkBarBtn]
+        // PiP button — chỉ hiện khi vào YouTube/video site
+        pipBarBtn = UIBarButtonItem(
+            image: UIImage(systemName: "pip.enter"),
+            style: .plain, target: self, action: #selector(enterPiP))
+        pipBarBtn.tintColor = UIColor.white.withAlphaComponent(0.4)
+
+        // Fullscreen button
+        fullscreenBarBtn = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"),
+            style: .plain, target: self, action: #selector(toggleFullscreen))
+        fullscreenBarBtn.tintColor = UIColor.white.withAlphaComponent(0.65)
+
+        updateNavButtons()
 
         setupWebView()
         setupProgressBar()
@@ -972,84 +997,121 @@ class WebViewController: UIViewController {
         webView?.stopLoading()
     }
 
+    // YouTube UA — dùng khi vào youtube.com để được serve đầy đủ tính năng
+    private var youtubeUserAgent: String {
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " +
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
+        "Version/17.0 Mobile/15E148 Safari/604.1"
+    }
+    private var isYouTubeSite: Bool {
+        url.host?.contains("youtube.com") == true || url.host?.contains("youtu.be") == true
+    }
+
     private func setupWebView() {
         let cfg = WKWebViewConfiguration()
 
-        // ── 1. Media
+        // ── Media: inline + PiP
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
+        cfg.allowsAirPlayForMediaPlayback = true
 
-        // ── 2. Persistent session store (cookie + cache không bị xoá)
+        // ── Persistent session (cookie, đăng nhập không mất)
         cfg.websiteDataStore = WKWebsiteDataStore.default()
 
-        // ── 3. JavaScript luôn bật
+        // ── JS luôn bật
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         cfg.defaultWebpagePreferences = prefs
-
-        // ── 4. Tắt selection callout (copy/paste) không cần thiết → giảm overhead
         cfg.selectionGranularity = .character
 
-        // ── 5. Cho phép AirPlay (media AI như Gemini)
-        cfg.allowsAirPlayForMediaPlayback = true
+        let uc = cfg.userContentController
 
-        // ── 6. Inject viewport meta + performance hints trước khi trang load
-        //    Giúp mobile layout ngay lần đầu, tránh reflow
-        let viewportScript = WKUserScript(
-            source: """
-            var meta = document.querySelector('meta[name=viewport]');
-            if (!meta) {
-                meta = document.createElement('meta');
-                meta.name = 'viewport';
-                document.head.appendChild(meta);
-            }
-            meta.content = 'width=device-width, initial-scale=1, maximum-scale=5';
-            """,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
-        )
-        cfg.userContentController.addUserScript(viewportScript)
+        // ── Viewport fix (iOS 15 reflow)
+        uc.addUserScript(WKUserScript(source: """
+            (function(){
+                var m=document.querySelector('meta[name=viewport]');
+                if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}
+                m.content='width=device-width,initial-scale=1,maximum-scale=5';
+            })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
-        // ── 7. Inject performance script: tắt animation nặng, lazy load images
-        let perfScript = WKUserScript(
-            source: """
-            // Giảm animation nặng khi scroll
-            document.addEventListener('DOMContentLoaded', function() {
-                var style = document.createElement('style');
-                style.textContent = '*, *::before, *::after { scroll-behavior: auto !important; }';
-                document.head.appendChild(style);
+        // ── Chặn quảng cáo YouTube: ẩn ad overlay, skip ad button, banner
+        uc.addUserScript(WKUserScript(source: """
+            (function(){
+                var AD_SELECTORS = [
+                    '.ad-showing','.ytp-ad-module','.ytp-ad-overlay-container',
+                    '.ytp-ad-text-overlay','.ytp-ad-skip-button-container',
+                    '#player-ads','ytd-banner-promo-renderer','ytd-ad-slot-renderer',
+                    'ytd-promoted-sparkles-web-renderer','.ytd-display-ad-renderer',
+                    '#masthead-ad','ytd-statement-banner-renderer',
+                    '.ytp-ce-element','#movie_player .ad-interrupting'
+                ];
+                function removeAds(){
+                    AD_SELECTORS.forEach(function(sel){
+                        document.querySelectorAll(sel).forEach(function(el){
+                            el.style.display='none';
+                        });
+                    });
+                    // Auto-click skip button nếu xuất hiện
+                    var skip=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button');
+                    if(skip) skip.click();
+                    // Nếu video đang trong ad (currentTime < 5), skip
+                    var vid=document.querySelector('video');
+                    if(vid && document.querySelector('.ad-showing')){
+                        vid.currentTime=vid.duration||30;
+                    }
+                }
+                // Chạy ngay + theo dõi DOM thay đổi
+                removeAds();
+                var obs=new MutationObserver(removeAds);
+                obs.observe(document.documentElement,{childList:true,subtree:true});
+                setInterval(removeAds,800);
+            })();
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+
+        // ── Picture-in-Picture: khi YouTube fullscreen → bật PiP tự động
+        uc.addUserScript(WKUserScript(source: """
+            (function(){
+                document.addEventListener('fullscreenchange',function(){
+                    var vid=document.querySelector('video');
+                    if(!document.fullscreenElement && vid){
+                        if(vid.readyState>=2 && typeof vid.requestPictureInPicture==='function'){
+                            vid.requestPictureInPicture().catch(function(){});
+                        }
+                    }
+                });
+            })();
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+
+        // ── Performance: tắt scroll-behavior CSS mặc định
+        uc.addUserScript(WKUserScript(source: """
+            document.addEventListener('DOMContentLoaded',function(){
+                var s=document.createElement('style');
+                s.textContent='*,*::before,*::after{scroll-behavior:auto!important}';
+                document.head.appendChild(s);
             });
-            """,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        )
-        cfg.userContentController.addUserScript(perfScript)
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
-        // ── 8. Build WKWebView
+        // ── Build WKWebView
         webView = WKWebView(frame: view.bounds, configuration: cfg)
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
         webView.uiDelegate = self
-
-        // ── 9. Back/forward swipe
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
 
-        // ── 10. Scroll tuning: nhanh hơn, mượt hơn
+        // ── Scroll
         webView.scrollView.decelerationRate = .normal
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         webView.scrollView.showsHorizontalScrollIndicator = false
 
-        // ── 11. Tắt opaque background → tránh flash trắng khi load
+        // ── Tránh flash trắng khi load
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
 
-        // ── 12. User-Agent: Safari thật → tránh bị serve mobile-lite fallback
-        webView.customUserAgent =
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) " +
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
-            "Version/17.0 Mobile/15E148 Safari/604.1"
+        // ── User-Agent Safari thật
+        webView.customUserAgent = youtubeUserAgent
 
         view.addSubview(webView)
         NSLayoutConstraint.activate([
@@ -1246,6 +1308,65 @@ class WebViewController: UIViewController {
             }
         }
     }
+
+    // ── Cập nhật nav buttons tuỳ theo site
+    private func updateNavButtons() {
+        if isYouTubeSite {
+            navigationItem.rightBarButtonItems = [reloadBarBtn, pipBarBtn, fullscreenBarBtn, bookmarkBarBtn]
+        } else {
+            navigationItem.rightBarButtonItems = [reloadBarBtn, readerBarBtn, bookmarkBarBtn]
+        }
+    }
+
+    // ── Picture-in-Picture: inject JS yêu cầu video vào PiP
+    @objc private func enterPiP() {
+        let js = """
+        (function(){
+            var vid = document.querySelector('video');
+            if(vid && typeof vid.requestPictureInPicture === 'function'){
+                vid.requestPictureInPicture().catch(function(e){ console.log('PiP error:',e); });
+            } else {
+                // YouTube: click nút fullscreen để trigger PiP qua fullscreenchange event
+                var fsBtn = document.querySelector('.ytp-fullscreen-button');
+                if(fsBtn) fsBtn.click();
+            }
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+        pipBarBtn.tintColor = .accentBlue
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    // ── Fullscreen: ẩn nav bar + status bar → web chiếm toàn màn hình
+    @objc private func toggleFullscreen() {
+        isFullscreen.toggle()
+        let hide = isFullscreen
+        UIView.animate(withDuration: 0.28) {
+            self.navigationController?.setNavigationBarHidden(hide, animated: false)
+        }
+        setNeedsStatusBarAppearanceUpdate()
+        fullscreenBarBtn.image = UIImage(systemName: isFullscreen
+            ? "arrow.down.right.and.arrow.up.left"
+            : "arrow.up.left.and.arrow.down.right")
+        // Double-tap để thoát fullscreen
+        if isFullscreen {
+            let tap = UITapGestureRecognizer(target: self, action: #selector(exitFullscreenTap))
+            tap.numberOfTapsRequired = 2
+            tap.name = "exitFS"
+            webView.addGestureRecognizer(tap)
+        } else {
+            webView.gestureRecognizers?.filter { $0.name == "exitFS" }.forEach {
+                webView.removeGestureRecognizer($0)
+            }
+        }
+    }
+
+    @objc private func exitFullscreenTap() {
+        if isFullscreen { toggleFullscreen() }
+    }
+
+    override var prefersStatusBarHidden: Bool { isFullscreen }
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .slide }
 }
 
 // String helper
@@ -1259,8 +1380,30 @@ extension WebViewController: WKNavigationDelegate {
         progressBar.isHidden = true; progressBar.setProgress(0, animated: false)
         if let t = webView.title, !t.isEmpty { title = t }
         persistCookiesToSafari()
-        // Enable reader button sau khi trang load xong
         readerBarBtn.tintColor = UIColor.white.withAlphaComponent(0.75)
+        updateNavButtons()
+
+        // Re-run ad blocker mỗi khi page load xong (YouTube navigate không reload full page)
+        if isYouTubeSite {
+            pipBarBtn.tintColor = UIColor.white.withAlphaComponent(0.75)
+            // Force re-inject ad block sau khi SPA navigate
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.webView.evaluateJavaScript("""
+                    (function(){
+                        var skip=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button');
+                        if(skip) skip.click();
+                        var vid=document.querySelector('video');
+                        if(vid && document.querySelector('.ad-showing') && vid.duration > 0){
+                            vid.currentTime=vid.duration;
+                        }
+                        ['.ytp-ad-module','.ytp-ad-overlay-container','#player-ads',
+                         'ytd-ad-slot-renderer','#masthead-ad'].forEach(function(s){
+                            document.querySelectorAll(s).forEach(function(el){el.style.display='none';});
+                        });
+                    })();
+                """, completionHandler: nil)
+            }
+        }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleError(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
@@ -1281,7 +1424,21 @@ extension WebViewController: WKNavigationDelegate {
         present(a, animated: true)
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = action.request.url, ["https","http","about"].contains(url.scheme ?? "") else { decisionHandler(.cancel); return }
+        guard let reqURL = action.request.url else { decisionHandler(.cancel); return }
+        let scheme = reqURL.scheme ?? ""
+        guard ["https","http","about","blob"].contains(scheme) else { decisionHandler(.cancel); return }
+
+        // Chặn ad network domains ở tầng network (trước khi load)
+        let host = reqURL.host ?? ""
+        let adHosts: [String] = [
+            "doubleclick.net","googlesyndication.com","googleadservices.com",
+            "adservice.google.com","pagead2.googlesyndication.com",
+            "tpc.googlesyndication.com","ads.youtube.com",
+            "static.doubleclick.net","adnxs.com","outbrain.com","taboola.com",
+        ]
+        if adHosts.contains(where: { host.hasSuffix($0) }) {
+            decisionHandler(.cancel); return
+        }
         decisionHandler(.allow)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { retryCount = 0; webView.reload() }
@@ -1762,4 +1919,3 @@ final class SettingsViewController: UIViewController {
 // ─────────────────────────────────────────
 // Entry point: dùng MainTabBarController thay vì HomeViewController
 typealias ViewController = MainTabBarController
-
