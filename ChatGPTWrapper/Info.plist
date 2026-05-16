@@ -4,28 +4,20 @@
 <dict>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
-
     <key>CFBundleIdentifier</key>
     <string>com.wrapper.chatgpt</string>
-
     <key>CFBundleName</key>
     <string>CustomBVK</string>
-
     <key>CFBundleDisplayName</key>
     <string>CustomBVK</string>
-
     <key>CFBundleVersion</key>
     <string>1</string>
-
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
-
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-
     <key>LSRequiresIPhoneOS</key>
     <true/>
-
     <key>MinimumOSVersion</key>
     <string>15.0</string>
 
@@ -41,22 +33,46 @@
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
 
+    <!-- Cho phép load mọi HTTP/HTTPS -->
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
 
+    <!-- Launch screen -->
     <key>UILaunchScreen</key>
     <dict/>
 
+    <!-- ── Quyền phần cứng ── -->
     <key>NSCameraUsageDescription</key>
-    <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích</string>
+    <string>Dùng camera để chụp tài liệu, bài tập cho AI phân tích và quay video</string>
 
     <key>NSMicrophoneUsageDescription</key>
-    <string>Dùng microphone để nhập liệu giọng nói cho AI</string>
+    <string>Dùng microphone để nhập liệu giọng nói cho AI và ghi âm</string>
 
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Chọn ảnh từ thư viện làm hình nền ứng dụng</string>
+    <string>Chọn ảnh từ thư viện làm hình nền hoặc gửi cho AI phân tích</string>
+
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Lưu ảnh và video từ ứng dụng vào thư viện</string>
+
+    <!-- ── YouTube PiP + phát nhạc nền khi tắt màn hình ── -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+        <string>fetch</string>
+    </array>
+
+    <!-- ── Luôn dùng Dark Mode ── -->
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
+
+    <!-- ── App tự quản lý status bar ── -->
+    <key>UIStatusBarHidden</key>
+    <false/>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <true/>
+
 </dict>
 </plist>
