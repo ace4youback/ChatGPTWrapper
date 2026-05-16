@@ -2,6 +2,7 @@ import UIKit
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
+
     var window: UIWindow?
 
     func application(
@@ -10,24 +11,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         window = UIWindow(frame: UIScreen.main.bounds)
 
-        let homeNav = UINavigationController(rootViewController: HomeViewController())
-        homeNav.tabBarItem = UITabBarItem(
-            title: "AI Tools",
-            image: UIImage(systemName: "brain"),
-            tag: 0)
-
-        let aboutNav = UINavigationController(rootViewController: AboutViewController())
-        aboutNav.tabBarItem = UITabBarItem(
-            title: "Tác giả",
-            image: UIImage(systemName: "person.2.fill"),
-            tag: 1)
-
-        let tab = UITabBarController()
-        tab.viewControllers = [homeNav, aboutNav]
-        tab.tabBar.tintColor = .systemBlue
-
-        window?.rootViewController = tab
+        // ✅ Dùng MainTabBarController thay UITabBarController cũ
+        let root = MainTabBarController()
+        window?.rootViewController = root
+        window?.backgroundColor = .black
         window?.makeKeyAndVisible()
+
         return true
+    }
+
+    // ✅ Quick Action: giữ icon app → chọn mở thẳng YouTube, ChatGPT...
+    func application(
+        _ application: UIApplication,
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        guard
+            let urlStr = shortcutItem.userInfo?["url"] as? String,
+            let root   = window?.rootViewController as? MainTabBarController
+        else { completionHandler(false); return }
+
+        root.handleQuickAction(url: urlStr)
+        completionHandler(true)
     }
 }
