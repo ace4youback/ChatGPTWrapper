@@ -3,6 +3,7 @@ import WebKit
 import Network
 import PhotosUI
 import AVKit
+import AVFoundation
 
 // ─────────────────────────────────────────
 // MARK: - Design Tokens
@@ -990,6 +991,29 @@ class WebViewController: UIViewController {
         syncCookiesThenLoad()
     }
 
+    private func showToast(_ msg: String) {
+        let t = UILabel()
+        t.text = "  \(msg)  "
+        t.font = .systemFont(ofSize: 13, weight: .medium)
+        t.textColor = .white; t.textAlignment = .center
+        t.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+        t.layer.cornerRadius = 14; t.layer.masksToBounds = true
+        t.layer.borderWidth = 0.5
+        t.layer.borderColor = UIColor.white.withAlphaComponent(0.14).cgColor
+        t.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(t)
+        NSLayoutConstraint.activate([
+            t.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            t.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            t.heightAnchor.constraint(equalToConstant: 38),
+        ])
+        t.alpha = 0
+        UIView.animate(withDuration: 0.2) { t.alpha = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            UIView.animate(withDuration: 0.3, animations: { t.alpha = 0 }) { _ in t.removeFromSuperview() }
+        }
+    }
+
     deinit {
         kvoToken?.invalidate()
         networkMonitor.cancel()
@@ -1394,51 +1418,226 @@ class WebViewController: UIViewController {
         }
     }
 
-    // ── Picture-in-Picture: inject JS yêu cầu video vào PiP
+    // ── PiP thật: lấy video src từ trang → play bằng AVPlayerViewController native
     @objc private func enterPiP() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        // Bước 1: lấy src video đang phát từ DOM
         let js = """
         (function(){
+            // YouTube: lấy từ video element src hoặc blob
             var vid = document.querySelector('video');
-            if(vid && typeof vid.requestPictureInPicture === 'function'){
-                vid.requestPictureInPicture().catch(function(e){ console.log('PiP error:',e); });
+            if(!vid) return JSON.stringify({error:'no_video'});
+
+            // Thử lấy src trực tiếp
+            var src = vid.src || '';
+
+            // Lấy current time để resume đúng chỗ
+            var ct = vid.currentTime || 0;
+            var paused = vid.paused;
+
+            return JSON.stringify({src: src, currentTime: ct, paused: paused,
+                                   host: location.hostname, href: location.href});
+        })()
+        """
+
+        webView.evaluateJavaScript(js) { [weak self] result, error in
+            guard let self = self,
+                  let jsonStr = result as? String,
+                  let data = jsonStr.data(using: .utf8),
+                  let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
+
+            let host = info["host"] as? String ?? ""
+            let href = info["href"] as? String ?? ""
+
+            if host.contains("youtube.com") || host.contains("youtu.be") {
+                // YouTube: dùng youtube-nocookie embed hoặc mở bằng YouTube app
+                self.handleYouTubePiP(href: href)
+            } else if let srcStr = info["src"] as? String,
+                      !srcStr.isEmpty,
+                      !srcStr.hasPrefix("blob:"),
+                      let url = URL(string: srcStr) {
+                // Non-blob src: play trực tiếp bằng AVPlayer
+                let ct = info["currentTime"] as? Double ?? 0
+                self.playWithAVPlayer(url: url, startTime: ct)
             } else {
-                // YouTube: click nút fullscreen để trigger PiP qua fullscreenchange event
-                var fsBtn = document.querySelector('.ytp-fullscreen-button');
-                if(fsBtn) fsBtn.click();
+                // Blob src (YouTube): inject AudioContext keepAlive thay thế
+                self.activateAudioKeepAlive()
+            }
+        }
+    }
+
+    // YouTube PiP: mở YouTube app nếu có, không thì dùng youtube-nocookie
+    private func handleYouTubePiP(href: String) {
+        // Trích video ID
+        var videoID: String? = nil
+        if let url = URL(string: href) {
+            // youtube.com/watch?v=XXXX
+            if let qItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
+                videoID = qItems.first(where: { $0.name == "v" })?.value
+            }
+            // youtu.be/XXXX
+            if videoID == nil && (url.host?.contains("youtu.be") == true) {
+                videoID = url.pathComponents.dropFirst().first
+            }
+        }
+
+        guard let vid = videoID else {
+            activateAudioKeepAlive(); return
+        }
+
+        // Thử mở YouTube app native (có PiP thật)
+        let ytApp = URL(string: "youtube://\(vid)")!
+        if UIApplication.shared.canOpenURL(ytApp) {
+            UIApplication.shared.open(ytApp, options: [:], completionHandler: nil)
+            pipBarBtn.tintColor = .accentBlue
+        } else {
+            // YouTube app không có → dùng nocookie embed trong AVPlayer
+            let embedURL = URL(string: "https://www.youtube-nocookie.com/embed/\(vid)?autoplay=1&playsinline=0")!
+            playWithAVPlayer(url: embedURL, startTime: 0)
+        }
+    }
+
+    // Play bằng AVPlayerViewController — có PiP thật của iOS
+    private func playWithAVPlayer(url: URL, startTime: Double) {
+        let player = AVPlayer(url: url)
+        if startTime > 0 {
+            player.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
+        }
+        let playerVC = AVPlayerViewController()
+        playerVC.player = player
+        playerVC.allowsPictureInPicturePlayback = true
+        if #available(iOS 16.0, *) {
+            playerVC.allowsVideoFrameAnalysis = false
+        }
+        present(playerVC, animated: true) {
+            player.play()
+        }
+        pipBarBtn.tintColor = .accentBlue
+    }
+
+    // Fallback: inject AudioContext để giữ audio session khi bấm Home
+    private func activateAudioKeepAlive() {
+        let js = """
+        (function(){
+            // Giữ AVAudioSession active bằng cách tạo AudioContext với silent node
+            try {
+                var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                var osc = ctx.createOscillator();
+                var gain = ctx.createGain();
+                gain.gain.value = 0.001; // gần im lặng, không ảnh hưởng video
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                window._bvkAudioCtx = ctx;
+            } catch(e) {}
+
+            // Override paused → tự resume
+            var vid = document.querySelector('video');
+            if(vid){
+                vid.addEventListener('pause', function(){
+                    if(document.hidden) {
+                        setTimeout(function(){ vid.play().catch(function(){}); }, 200);
+                    }
+                });
             }
         })();
         """
         webView.evaluateJavaScript(js, completionHandler: nil)
-        pipBarBtn.tintColor = .accentBlue
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        pipBarBtn.tintColor = UIColor.accentBlue.withAlphaComponent(0.6)
+
+        // Toast giải thích
+        showToast("Nhạc tiếp tục phát khi về màn hình chính")
     }
 
     // ── Fullscreen: ẩn nav bar + status bar → web chiếm toàn màn hình
     @objc private func toggleFullscreen() {
         isFullscreen.toggle()
-        let hide = isFullscreen
-        UIView.animate(withDuration: 0.28) {
-            self.navigationController?.setNavigationBarHidden(hide, animated: false)
-        }
+
+        // ✅ Fix 1: ẩn/hiện cả tab bar của MainTabBarController
+        // Tìm MainTabBarController trong hierarchy
+        findMainTabBar()?.setTabBarVisible(!isFullscreen, animated: true)
+
+        // Ẩn/hiện navigation bar
+        navigationController?.setNavigationBarHidden(isFullscreen, animated: true)
+
+        // Cập nhật status bar
         setNeedsStatusBarAppearanceUpdate()
+
+        // Cập nhật icon nút
         fullscreenBarBtn.image = UIImage(systemName: isFullscreen
             ? "arrow.down.right.and.arrow.up.left"
             : "arrow.up.left.and.arrow.down.right")
-        // Double-tap để thoát fullscreen
+
+        // ✅ Fix 2: dùng overlay view để bắt tap thoát fullscreen
+        // Không dùng gesture trên WKWebView vì bị nuốt
         if isFullscreen {
-            let tap = UITapGestureRecognizer(target: self, action: #selector(exitFullscreenTap))
-            tap.numberOfTapsRequired = 2
-            tap.name = "exitFS"
-            webView.addGestureRecognizer(tap)
+            addExitFullscreenOverlay()
         } else {
-            webView.gestureRecognizers?.filter { $0.name == "exitFS" }.forEach {
-                webView.removeGestureRecognizer($0)
-            }
+            removeExitFullscreenOverlay()
         }
     }
 
-    @objc private func exitFullscreenTap() {
-        if isFullscreen { toggleFullscreen() }
+    // Tìm MainTabBarController trong chuỗi parent
+    private func findMainTabBar() -> MainTabBarController? {
+        var p = parent
+        while let cur = p {
+            if let main = cur as? MainTabBarController { return main }
+            p = cur.parent
+        }
+        return nil
+    }
+
+    // ✅ Fix 2: overlay mỏng ở góc trên trái — tap để thoát fullscreen
+    // Không che nội dung web, user vẫn tương tác bình thường
+    private let exitFSButton = UIButton(type: .system)
+
+    private func addExitFullscreenOverlay() {
+        exitFSButton.setImage(UIImage(systemName: "arrow.down.right.and.arrow.up.left",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)), for: .normal)
+        exitFSButton.tintColor = .white
+        exitFSButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        exitFSButton.layer.cornerRadius = 14
+        exitFSButton.translatesAutoresizingMaskIntoConstraints = false
+        exitFSButton.addTarget(self, action: #selector(toggleFullscreen), for: .touchUpInside)
+        view.addSubview(exitFSButton)
+        NSLayoutConstraint.activate([
+            exitFSButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            exitFSButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
+            exitFSButton.widthAnchor.constraint(equalToConstant: 36),
+            exitFSButton.heightAnchor.constraint(equalToConstant: 36),
+        ])
+        exitFSButton.alpha = 0
+        UIView.animate(withDuration: 0.2) { self.exitFSButton.alpha = 1 }
+
+        // Tự ẩn sau 3 giây, tap để hiện lại
+        scheduleHideExitButton()
+    }
+
+    private func removeExitFullscreenOverlay() {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(hideExitButton), object: nil)
+        UIView.animate(withDuration: 0.2, animations: { self.exitFSButton.alpha = 0 }) { _ in
+            self.exitFSButton.removeFromSuperview()
+        }
+    }
+
+    private func scheduleHideExitButton() {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(hideExitButton), object: nil)
+        perform(#selector(hideExitButton), with: nil, afterDelay: 3.0)
+    }
+
+    @objc private func hideExitButton() {
+        UIView.animate(withDuration: 0.3) { self.exitFSButton.alpha = 0 }
+    }
+
+    // Tap webview khi fullscreen → hiện lại nút thoát
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        if isFullscreen && exitFSButton.superview != nil {
+            UIView.animate(withDuration: 0.2) { self.exitFSButton.alpha = 1 }
+            scheduleHideExitButton()
+        }
     }
 
     override var prefersStatusBarHidden: Bool { isFullscreen }
@@ -1953,6 +2152,21 @@ final class MainTabBarController: UIViewController {
 
     // Expose for AboutViewController to push
     func pushAbout() { switchTo(index: 3) }
+
+    // ✅ Ẩn/hiện tab bar từ WebViewController fullscreen
+    func setTabBarVisible(_ visible: Bool, animated: Bool) {
+        guard tabBar.isHidden != !visible else { return }
+        let duration = animated ? 0.28 : 0.0
+        UIView.animate(withDuration: duration,
+                       delay: 0,
+                       usingSpringWithDamping: 0.85,
+                       initialSpringVelocity: 0) {
+            self.tabBar.alpha = visible ? 1 : 0
+            self.tabBar.transform = visible ? .identity : CGAffineTransform(translationX: 0, y: 100)
+        } completion: { _ in
+            self.tabBar.isHidden = !visible
+        }
+    }
 
     // ✅ Quick Actions: giữ icon app → chọn mở thẳng YouTube, ChatGPT, Claude...
     private func setupQuickActions() {
