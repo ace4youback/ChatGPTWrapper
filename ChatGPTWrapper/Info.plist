@@ -33,14 +33,12 @@
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
 
-    <!-- Cho phép load mọi HTTP/HTTPS -->
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
 
-    <!-- Launch screen -->
     <key>UILaunchScreen</key>
     <dict/>
 
@@ -57,11 +55,18 @@
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Lưu ảnh và video từ ứng dụng vào thư viện</string>
 
-    <!-- ── YouTube PiP + phát nhạc nền khi tắt màn hình ── -->
+    <!-- ── Phát nhạc/video nền + PiP khi bấm Home ── -->
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
         <string>fetch</string>
+    </array>
+
+    <!-- ── Cho phép mở YouTube app native (canOpenURL) ── -->
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>youtube</string>
+        <string>youtu.be</string>
     </array>
 
     <!-- ── Luôn dùng Dark Mode ── -->
