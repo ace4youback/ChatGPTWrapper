@@ -1023,26 +1023,46 @@ class WebViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
     }
 
-    // ✅ FIX AUDIO: AVAudioSession cho phép phát nhạc nền khi bấm Home
+    // ✅ FIX AUDIO: AVAudioSession đúng chuẩn background playback
     private func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            // .playback = tiếp tục phát dù khoá màn hình / bấm Home
-            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetooth])
-            try session.setActive(true)
+            // .playback + không mixWithOthers → app chiếm audio session
+            // → iOS KHÔNG dừng audio khi bấm Home
+            try session.setCategory(.playback,
+                                    mode: .moviePlayback,
+                                    options: [.allowAirPlay,
+                                              .allowBluetooth,
+                                              .allowBluetoothA2DP])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("AVAudioSession error:", error)
         }
 
-        // Theo dõi khi app vào background → inject JS giữ video không dừng
+        // Background/Foreground observer
         NotificationCenter.default.addObserver(self,
             selector: #selector(appDidEnterBackground),
-            name: UIApplication.didEnterBackgroundNotification,
-            object: nil)
+            name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self,
             selector: #selector(appWillEnterForeground),
-            name: UIApplication.willEnterForegroundNotification,
-            object: nil)
+            name: UIApplication.willEnterForegroundNotification, object: nil)
+
+        // ✅ Resume sau khi bị interrupt (cuộc gọi, Siri...)
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(audioInterrupted(_:)),
+            name: AVAudioSession.interruptionNotification, object: nil)
+    }
+
+    @objc private func audioInterrupted(_ n: Notification) {
+        guard let info = n.userInfo,
+              let typeVal = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeVal) else { return }
+        if type == .ended {
+            // Resume audio session + resume video
+            try? AVAudioSession.sharedInstance().setActive(true)
+            webView?.evaluateJavaScript(
+                "document.querySelector('video')?.play().catch(function(){})", completionHandler: nil)
+        }
     }
 
     // Khi bấm Home: inject JS để video không dừng + tự vào PiP
@@ -1205,10 +1225,12 @@ class WebViewController: UIViewController {
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         webView.scrollView.showsHorizontalScrollIndicator = false
 
-        // ── Tránh flash trắng khi load
-        webView.isOpaque = false
-        webView.backgroundColor = .black
+        // ── Tránh flash trắng: dùng backgroundColor thay isOpaque
+        // isOpaque=false làm video render đen trên iOS — KHÔNG dùng
+        webView.isOpaque = true
+        webView.backgroundColor = UIColor(red:0.05,green:0.05,blue:0.05,alpha:1)
         webView.scrollView.backgroundColor = .black
+        webView.underPageBackgroundColor = .black
 
         // ── User-Agent Safari thật
         webView.customUserAgent = youtubeUserAgent
@@ -2107,18 +2129,19 @@ final class MainTabBarController: UIViewController {
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tabBar)
 
+        // tabBarBottomConstraint lưu lại để animate
         NSLayoutConstraint.activate([
-            // Tab bar: float above bottom, 14pt margin each side
             tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
             tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
             tabBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
             tabBar.heightAnchor.constraint(equalToConstant: 64),
 
-            // Container fills everything above tab bar
+            // Container chiếm TOÀN BỘ màn hình — tab bar float lên trên
+            // WebView sẽ extend xuống dưới tab bar, tab bar tự ẩn khi push
             container.topAnchor.constraint(equalTo: view.topAnchor),
             container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            container.bottomAnchor.constraint(equalTo: tabBar.topAnchor, constant: -8),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
         tabBar.onSelect = { [weak self] index in
@@ -2155,16 +2178,16 @@ final class MainTabBarController: UIViewController {
 
     // ✅ Ẩn/hiện tab bar từ WebViewController fullscreen
     func setTabBarVisible(_ visible: Bool, animated: Bool) {
-        guard tabBar.isHidden != !visible else { return }
-        let duration = animated ? 0.28 : 0.0
+        let duration = animated ? 0.30 : 0.0
+        let offY = tabBar.bounds.height + 20  // đủ ra khỏi màn hình
         UIView.animate(withDuration: duration,
                        delay: 0,
-                       usingSpringWithDamping: 0.85,
-                       initialSpringVelocity: 0) {
-            self.tabBar.alpha = visible ? 1 : 0
-            self.tabBar.transform = visible ? .identity : CGAffineTransform(translationX: 0, y: 100)
-        } completion: { _ in
-            self.tabBar.isHidden = !visible
+                       usingSpringWithDamping: 0.8,
+                       initialSpringVelocity: 0.3,
+                       options: [.curveEaseInOut]) {
+            self.tabBar.alpha     = visible ? 1 : 0
+            self.tabBar.transform = visible ? .identity
+                                           : CGAffineTransform(translationX: 0, y: offY)
         }
     }
 
